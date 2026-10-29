@@ -758,15 +758,7 @@ resource "kubernetes_persistent_volume_claim_v1" "postgresql_data" {
   }
 }
 
-import {
-  to = kubernetes_persistent_volume_claim_v1.postgresql_data["data-postgresql-primary-0"]
-  id = "infra/data-postgresql-primary-0"
-}
 
-import {
-  to = kubernetes_persistent_volume_claim_v1.postgresql_data["data-postgresql-read-0"]
-  id = "infra/data-postgresql-read-0"
-}
 
 # Metrics API used by kubectl top and Kubernetes autoscaling. PostgreSQL exposes
 # database-specific metrics through its exporter sidecar; a Prometheus deployment
