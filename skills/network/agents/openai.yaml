@@ -1,0 +1,4 @@
+interface:
+  display_name: "Network"
+  short_description: "Manage in-cluster connectivity"
+  default_prompt: "Use $network to diagnose or change network policies between namespaces."

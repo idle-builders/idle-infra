@@ -1,0 +1,19 @@
+# HELP pg_up Whether the PostgreSQL exporter can reach its server.
+# TYPE pg_up gauge
+pg_up 1
+# HELP pg_settings_max_connections Configured connection ceiling.
+# TYPE pg_settings_max_connections gauge
+pg_settings_max_connections 75
+pg_stat_database_numbackends{datid="5",datname="postgres"} 21
+pg_stat_database_xact_commit{datid="5",datname="postgres"} 16514366
+pg_stat_database_xact_rollback{datid="5",datname="postgres"} 6088
+pg_stat_database_conflicts{datid="5",datname="postgres"} 0
+pg_stat_database_deadlocks{datid="5",datname="postgres"} 0
+pg_stat_database_temp_bytes{datid="5",datname="postgres"} 883089556068
+pg_database_size_bytes{datname="postgres"} 7270815423
+pg_replication_is_replica 0
+pg_replication_lag_seconds 0
+pg_replication_last_replay_seconds 0
+# Families deliberately excluded for cost or unsafe labels.
+pg_settings_work_mem_bytes 4194304
+pg_stat_activity_count{application_name="example",datname="postgres",state="idle",usename="example"} 4

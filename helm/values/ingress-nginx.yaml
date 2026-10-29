@@ -1,0 +1,72 @@
+controller:
+  replicaCount: 2
+  # The chart owns the controller PodDisruptionBudget. Keep one replica
+  # available without adding a second, overlapping Terraform-managed PDB.
+  minAvailable: 1
+  nodeSelector: {}
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/instance: ingress-nginx
+              app.kubernetes.io/name: ingress-nginx
+          topologyKey: kubernetes.io/hostname
+  # Catch-all for hosts/paths matching no tenant Ingress -> the "nothing
+  # deployed" page (see default-backend.tf). The chart's own default backend
+  # stays disabled (defaultBackend.enabled: false).
+  extraArgs:
+    default-backend-service: infra/nothing-deployed
+    # Bounded request metrics for the node-local collectors (O1 edge slice):
+    # no per-host series, status classes instead of codes, and only the
+    # request, upstream-response and upstream-connect latency histograms.
+    metrics-per-host: "false"
+    report-status-classes: "true"
+    exclude-socket-metrics: "nginx_ingress_controller_header_duration_seconds,nginx_ingress_controller_request_size,nginx_ingress_controller_response_size,nginx_ingress_controller_bytes_sent"
+    # pprof shares the metrics port; collectors have no use for it.
+    profiling: "false"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    # No public origin: the only ingress path is the Cloudflare Tunnel
+    # (cloudflared -> this controller in-cluster). ClusterIP means there is no
+    # external LoadBalancer / floating IP. See tunnel.tf.
+    type: ClusterIP
+  # Exposes the existing :10254 endpoint as a named container port so the
+  # collectors can discover it. Only collectors may reach it (main.tf); no
+  # ServiceMonitor, no metrics Service.
+  metrics:
+    enabled: true
+    service:
+      enabled: false
+    serviceMonitor:
+      enabled: false
+  admissionWebhooks:
+    enabled: true
+  addHeaders:
+    X-Frame-Options: "SAMEORIGIN"
+    X-Content-Type-Options: "nosniff"
+    Referrer-Policy: "strict-origin-when-cross-origin"
+    Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+  config:
+    hsts: "true"
+    hsts-include-subdomains: "true"
+    hsts-max-age: "31536000"
+    ssl-redirect: "true"
+    proxy-body-size: "10m"
+    server-tokens: "false"
+    hide-headers: "X-Powered-By,Server"
+    http-snippet: |
+      limit_req_zone $binary_remote_addr zone=global_rps:10m rate=20r/s;
+    server-snippet: |
+      limit_req zone=global_rps burst=100 nodelay;
+    limit-req-status-code: "429"
+    limit-conn-status-code: "429"
+defaultBackend:
+  enabled: false

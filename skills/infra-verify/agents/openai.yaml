@@ -1,0 +1,4 @@
+interface:
+  display_name: "Infra Verify"
+  short_description: "Prove a change is correct"
+  default_prompt: "Use $infra-verify to run the right verification tier for an infrastructure change."

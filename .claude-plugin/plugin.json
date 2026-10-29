@@ -1,0 +1,11 @@
+{
+  "name": "infra",
+  "description": "Operate the shared Infomaniak platform from any repository: diagnose a failure to the layer that owns it, take a change through PR, merge, apply and live proof, and work the database, cluster, Cloudflare edge, identity, object storage, network policy, tenants, and app deploys.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Idle Builders"
+  },
+  "homepage": "https://github.com/idle-builders/idle-infra",
+  "repository": "https://github.com/idle-builders/idle-infra",
+  "skills": "./skills"
+}

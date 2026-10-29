@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloudflare"
+  short_description: "Manage DNS and the edge"
+  default_prompt: "Use $cloudflare to manage DNS records, published hostnames, or the Cloudflare Tunnel."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Storage"
+  short_description: "Manage object storage and presign"
+  default_prompt: "Use $storage to manage buckets, storage-broker policy, or debug presigned URLs."

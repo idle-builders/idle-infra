@@ -1,0 +1,4 @@
+interface:
+  display_name: "Infra Check"
+  short_description: "Platform health sweep"
+  default_prompt: "Use $infra-check to check the health of the platform or one part of it."

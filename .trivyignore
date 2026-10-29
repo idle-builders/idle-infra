@@ -1,0 +1,5 @@
+# Accepted risk: tenant internet egress (0.0.0.0/0 on port 443).
+# Tenant apps require outbound HTTPS for external APIs, LLM providers, and
+# payment processors. Mitigated by port 443 only + RFC1918 exclusion.
+# See: terraform/main/modules/tenant/main.tf allow_internet_egress
+KUBE-0002

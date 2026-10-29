@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cluster Access"
+  short_description: "Access and recover the shared cluster"
+  default_prompt: "Use $cluster-access to securely access or recover the shared infrastructure cluster."

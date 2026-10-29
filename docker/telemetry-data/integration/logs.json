@@ -1,0 +1,1 @@
+{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"integration-api"}}]},"scopeLogs":[{"scope":{"name":"integration"},"logRecords":[{"timeUnixNano":"100","severityNumber":17,"severityText":"ERROR","traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174","body":{"stringValue":"integration failure"}}]}]}]}

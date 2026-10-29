@@ -1,0 +1,1566 @@
+openapi: 3.1.0
+
+# =============================================================================
+# infra-console v1 — read surface
+#
+# This document is the SINGLE SOURCE for two generated artifacts:
+#   1. Go server stubs + types  (oapi-codegen)
+#   2. MCP tool definitions     (scripts/gen-mcp-tools.py, reads x-mcp)
+#
+# Do not hand-write either. Edit this file and regenerate. The SPA
+# (docker/infra-console/web/index.html) is hand-written and NOT generated from
+# this document, so it can drift — only the two above cannot.
+# See docs/plans/infra-console.md.
+#
+# VARIANTS. Every operation declares `x-variants`, mirroring Appwrite's
+# console/server/client spec split:
+#   console — served to the browser SPA
+#   agent   — exposed as an MCP tool
+# An operation absent from `agent` is deliberately not reachable by an agent.
+#
+# SCOPE. Reads only. No operation in this document mutates anything, and this
+# document does not anticipate ones that will — a write surface is a separate
+# design with its own problems to solve.
+# =============================================================================
+
+info:
+  title: infra-console
+  version: 1.0.0
+  summary: Read surface over the shared platform — current state and bounded observability evidence.
+  description: |
+    A read-only surface over systems that already own their state. The browser
+    console and the agent MCP server are both generated from this document.
+
+    Aggregates fan out across independent backends and NEVER fail as a whole:
+    each part is a `Section` with its own status, and `data` is absent when a
+    source is unavailable. Branch on `Section.status` — a blind read of `data`
+    renders a confident zero for a dead backend. Single-resource endpoints do
+    fail whole, with 503.
+
+    Reads come from a per-source cache. `fetchedAt` is always set; `stale` means
+    a refresh attempt failed.
+  contact:
+    name: infra
+  license:
+    name: UNLICENSED
+
+servers:
+  - url: https://console.example.com/v1
+    description: Production, behind the Cloudflare tunnel
+  - url: http://127.0.0.1:8080/v1
+    description: Local, kubeconfig-backed, no auth
+
+tags:
+  - name: platform
+    description: Cluster-wide state. Not scoped to a project.
+  - name: projects
+    description: Per-tenant aggregates.
+  - name: workloads
+    description: Pods, deployments, logs.
+  - name: database
+    description: PostgreSQL catalogs, activity, and row browsing.
+  - name: storage
+    description: Object storage and broker grant policy.
+  - name: identity
+    description: Zitadel orgs, applications, users.
+  - name: edge
+    description: DNS, hostnames, tunnel, TLS.
+  - name: observability
+    description: Bounded historical evidence from the lightweight telemetry store.
+
+security:
+  - zitadelOidc: []
+
+paths:
+
+  # ---------------------------------------------------------------- platform
+
+  /platform:
+    get:
+      operationId: getPlatform
+      summary: Cluster summary
+      description: Nodes, capacity, shared services, tenant roll-up, backup state.
+      tags: [platform]
+      x-variants: [console, agent]
+      x-mcp:
+        tool: infra_platform_overview
+        readOnlyHint: true
+      responses:
+        "200":
+          description: Aggregate. Inspect each section's status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlatformOverview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /platform/nodes:
+    get:
+      operationId: listNodes
+      summary: Worker nodes
+      tags: [platform]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_list_nodes, readOnlyHint: true }
+      responses:
+        "200":
+          description: Worker nodes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodes, fetchedAt]
+                properties:
+                  nodes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Node" }
+                  fetchedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  /platform/services:
+    get:
+      operationId: listSharedServices
+      summary: Shared services in the infra namespace
+      description: |
+        Chart and version come from the `helm.sh/chart` and
+        `app.kubernetes.io/version` labels, not the Helm release Secret — so the
+        ClusterRole needs no secrets access.
+      tags: [platform]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_list_shared_services, readOnlyHint: true }
+      responses:
+        "200":
+          description: Shared services in the infra namespace.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [services, fetchedAt]
+                properties:
+                  services:
+                    type: array
+                    items: { $ref: "#/components/schemas/SharedService" }
+                  fetchedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  /platform/backups:
+    get:
+      operationId: getBackupStatus
+      summary: PostgreSQL backup state
+      description: Last successful run, schedule, and whether a restore has ever been verified.
+      tags: [platform]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_backup_status, readOnlyHint: true }
+      responses:
+        "200":
+          description: PostgreSQL backup state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BackupStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  # ---------------------------------------------------------------- projects
+
+  /projects:
+    get:
+      operationId: listProjects
+      summary: Tenants known to the platform
+      description: |
+        Derived from namespaces carrying the `platform.infra/tenant` label, so
+        the list reflects what Terraform actually provisioned rather than a
+        hardcoded roster.
+      tags: [projects]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_list_projects, readOnlyHint: true }
+      responses:
+        "200":
+          description: Tenants known to the platform.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects, fetchedAt]
+                properties:
+                  projects:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProjectSummary" }
+                  fetchedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /projects/{project}:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: getProject
+      summary: Project overview
+      description: |
+        The console's landing screen for a tenant. Fans out across four
+        backends; each arrives as its own Section.
+      tags: [projects]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_project_overview, readOnlyHint: true }
+      responses:
+        "200":
+          description: Project overview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectOverview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # --------------------------------------------------------------- workloads
+
+  /projects/{project}/releases:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: listReleases
+      summary: Release history
+      description: |
+        A RELEASE is a Helm revision — not a Kubernetes Deployment. For the
+        running workloads and their pods, use the workloads operation.
+
+        Helm revisions from the tenant namespace's release ConfigMaps
+        (`HELM_DRIVER=configmap`, ~10 retained), enriched from GitHub Actions.
+
+        Commit, actor and duration come from joining the running `image.tag` —
+        which IS the commit SHA — to the run with the matching `head_sha`. No
+        tenant CI callback needed. GitHub unreachable → fields null,
+        `source: helm`; render a null commit as unknown, not an error.
+      tags: [workloads]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_list_releases, readOnlyHint: true }
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Release history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases, fetchedAt]
+                properties:
+                  releases:
+                    type: array
+                    items: { $ref: "#/components/schemas/Release" }
+                  fetchedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /projects/{project}/workloads:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: listWorkloads
+      summary: Pods and their controllers
+      tags: [workloads]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_list_workloads, readOnlyHint: true }
+      responses:
+        "200":
+          description: Pods and their controllers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workloads, fetchedAt]
+                properties:
+                  workloads:
+                    type: array
+                    items: { $ref: "#/components/schemas/Workload" }
+                  fetchedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /projects/{project}/workloads/{pod}/logs:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+      - name: pod
+        in: path
+        required: true
+        schema: { type: string, maxLength: 253 }
+    get:
+      operationId: getWorkloadLogs
+      summary: Container logs
+      description: |
+        Proxies Kubernetes `pods/log`, bounded by `tailLines`. No historical
+        store: a restarted pod's previous output is gone unless `previous` is
+        set.
+      tags: [workloads]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_get_logs, readOnlyHint: true }
+      parameters:
+        - name: container
+          in: query
+          schema: { type: string }
+        - name: tailLines
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 2000, default: 200 }
+        - name: previous
+          in: query
+          description: Read the previous terminated container instead of the running one.
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Container logs.
+          content:
+            text/plain:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  # ---------------------------------------------------------------- database
+
+  /projects/{project}/database:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: getDatabase
+      summary: Schema summary
+      tags: [database]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_database_summary, readOnlyHint: true }
+      responses:
+        "200":
+          description: Schema summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  /projects/{project}/database/tables:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: listTables
+      summary: Tables in the tenant schema
+      description: |
+        Row counts are ESTIMATES from `pg_class.reltuples`, never `COUNT(*)`.
+        An exact count on a large table would scan it and can stall the shared
+        instance. The field is named `rowsEstimate` so no caller mistakes it
+        for exact.
+      tags: [database]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_list_tables, readOnlyHint: true }
+      responses:
+        "200":
+          description: Tables in the tenant schema.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, tables, fetchedAt]
+                properties:
+                  schema: { type: string }
+                  tables:
+                    type: array
+                    items: { $ref: "#/components/schemas/Table" }
+                  fetchedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  /projects/{project}/database/tables/{table}/rows:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+      - name: table
+        in: path
+        required: true
+        description: |
+          Unqualified table name. The schema is derived from the project and
+          is never caller-supplied, exactly as the storage broker derives the
+          bucket from the verified identity rather than the request body.
+        schema:
+          type: string
+          maxLength: 63
+          pattern: "^[a-zA-Z_][a-zA-Z0-9_]*$"
+    get:
+      operationId: listRows
+      summary: Browse rows
+      description: |
+        - Executes as `platform_reader`: SELECT only, with a server-side
+          `statement_timeout`.
+        - Hard `limit`, keyset pagination via `after`. No offset paging.
+        - A column is returned as `null`, and listed in `maskedColumns`, exactly
+          when `platform_reader` has no SELECT privilege on it. The owner
+          controls that with column-level GRANT; the console never decides what
+          is sensitive and does not inspect column names. Withholding is opt-in,
+          so BY DEFAULT EVERY COLUMN IS RETURNED IN FULL — do not assume a
+          column named `email` or `api_key` is masked. Masking is applied in the
+          SQL projection, so a withheld value never leaves PostgreSQL.
+        - Every call is logged to stdout with the caller, project, table and
+          row count.
+
+        Ordering is by primary key. A table without a single-column primary
+        key returns 409 rather than an unstable ordering.
+      tags: [database]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_browse_rows, readOnlyHint: true }
+      # Exposed to agents deliberately. An agent holding cluster-admin kubectl
+      # can already reach this data by reading a tenant's database-url Secret
+      # and connecting directly — with no masking, no LIMIT and no audit trail.
+      # This operation is strictly narrower than that path.
+      # See docs/plans/infra-console.md section 4.3.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: after
+          in: query
+          description: Opaque keyset cursor from the previous page.
+          schema: { type: string, maxLength: 512 }
+      responses:
+        "200":
+          description: Browse rows.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RowPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Table has no single-column primary key, so stable paging is impossible.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  /projects/{project}/database/activity:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: getDatabaseActivity
+      summary: Connections, running queries, locks
+      description: |
+        Sessions are matched by the tenant's database ROLE, not against its schema — so a statement
+        that role runs against another schema is included, and one another role
+        runs against this schema is not. Only the leading SQL keyword is
+        returned, never statement text.
+      tags: [database]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_database_activity, readOnlyHint: true }
+      responses:
+        "200":
+          description: Connections, running queries, locks.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseActivity" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  # ----------------------------------------------------------------- storage
+
+  /projects/{project}/storage:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: getStorage
+      summary: Bucket usage
+      description: |
+        Exact object count and bytes from the object-storage provider's
+        container metadata. This is a constant-time metadata read, not an S3
+        object listing or an estimate.
+      tags: [storage]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_storage_summary, readOnlyHint: true }
+      responses:
+        "200":
+          description: Bucket usage.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StorageSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  /projects/{project}/storage/policy:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: getStoragePolicy
+      summary: Broker grant policy for this project
+      description: |
+        Rendered from the storage-broker policy ConfigMap. This is the only
+        place the policy is legible as data rather than as HCL; there is no
+        other UI for it anywhere.
+      tags: [storage]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_storage_policy, readOnlyHint: true }
+      responses:
+        "200":
+          description: Broker grant policy for this project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoragePolicy" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- identity
+
+  /projects/{project}/auth:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: getAuth
+      summary: Zitadel org, applications, user count
+      description: |
+        Summary plus a deep link. Zitadel owns this state and has its own
+        console and audit trail; rebuilding either would be duplication.
+      tags: [identity]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_auth_summary, readOnlyHint: true }
+      responses:
+        "200":
+          description: Zitadel org, applications, user count.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  # -------------------------------------------------------------------- edge
+
+  /projects/{project}/domains:
+    parameters:
+      - $ref: "#/components/parameters/Project"
+    get:
+      operationId: listProjectDomains
+      summary: Hostnames serving this project
+      description: |
+        Hostnames from the project's Ingresses. TLS for
+        tunnel-fronted hosts is Cloudflare Universal SSL, not a cert-manager
+        Certificate — `tlsSource` distinguishes them, and only `cert-manager`
+        carries a meaningful expiry.
+      tags: [edge]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_list_domains, readOnlyHint: true }
+      responses:
+        "200":
+          description: Hostnames serving this project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hostnames, fetchedAt]
+                properties:
+                  hostnames:
+                    type: array
+                    items: { $ref: "#/components/schemas/Hostname" }
+                  fetchedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /platform/edge:
+    get:
+      operationId: getEdge
+      summary: Tunnel health, zones, all hostnames
+      tags: [edge]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_edge_overview, readOnlyHint: true }
+      responses:
+        "200":
+          description: Tunnel health, zones, all hostnames.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EdgeOverview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ---------------------------------------------------------- observability
+
+  /observability:
+    get:
+      operationId: getObservability
+      summary: Recent warnings and resource evidence
+      description: |
+        A bounded, on-demand read over committed telemetry Parquet. It reports
+        signal coverage, deduplicated Kubernetes warnings, latest workload
+        CPU/memory/restart/readiness values, node health, and bounded
+        PostgreSQL, storage-broker, and Zitadel authentication service
+        evidence, plus complete application operation counters and heavily
+        sampled trace/log bundles. A missing signal is an explicit gap; it is
+        never rendered as healthy or zero.
+
+        The query process starts only for this request. It cannot interrupt
+        collectors or compaction and it accepts no SQL, object key, or backend
+        query language.
+      tags: [observability]
+      x-variants: [console, agent]
+      x-mcp: { tool: infra_observability, readOnlyHint: true }
+      parameters:
+        - name: windowMinutes
+          in: query
+          description: Lookback ending at request time.
+          schema: { type: integer, minimum: 5, maximum: 2880, default: 60 }
+        - name: namespace
+          in: query
+          description: Optional Kubernetes namespace filter.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9._-]+$"
+            maxLength: 253
+        - name: workload
+          in: query
+          description: Optional workload filter within the selected namespace.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9._-]+$"
+            maxLength: 253
+        - name: service
+          in: query
+          description: Optional OpenTelemetry service.name filter.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9._-]+$"
+            maxLength: 253
+        - name: limit
+          in: query
+          description: Maximum warnings and workloads returned per list.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Recent committed observability evidence.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ObservabilityOverview" }
+        "400":
+          description: A window, limit, namespace, workload, or service filter is outside its bound.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/SourceUnavailable" }
+
+  # ----------------------------------------------------------------- metrics
+
+components:
+
+  securitySchemes:
+    zitadelOidc:
+      type: openIdConnect
+      openIdConnectUrl: https://id.example.com/.well-known/openid-configuration
+      description: |
+        Authority is a Zitadel IAM_OWNER membership, not an OAuth scope, and is
+        re-read on every verification. Console callers sign in with
+        authorization code + PKCE; agents present a bearer token against the
+        same issuer.
+
+        See docker/infra-console/internal/auth/auth.go for why USERINFO rather
+        than JWKS, and docs/plans/infra-console.md for why a membership rather
+        than a scope.
+
+  parameters:
+    Project:
+      name: project
+      in: path
+      required: true
+      description: >
+        Tenant project name. Equals the Kubernetes namespace and the PostgreSQL
+        schema; the server rejects any namespace that does not carry the
+        platform.infra/tenant label, so this is never a way to reach infra.
+      schema:
+        type: string
+        pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+        maxLength: 63
+
+  responses:
+    Unauthorized:
+      description: No credential, or one the issuer rejected.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: >
+        Authenticated, but not a platform operator: the caller holds no
+        IAM_OWNER membership in Zitadel.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: No such project, table, or pod.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    SourceUnavailable:
+      description: >
+        A backing system could not be reached for a single-source endpoint.
+        Aggregates never use this — they degrade per Section instead.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+
+    Problem:
+      description: RFC 9457 problem details.
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, default: "about:blank" }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        source:
+          description: Which backing system produced the failure, when one did.
+          $ref: "#/components/schemas/SourceName"
+
+    SourceName:
+      type: string
+      enum: [kubernetes, postgres, zitadel, objectStorage, cloudflare, github, telemetry]
+
+    SectionStatus:
+      type: string
+      enum: [ok, degraded, unavailable]
+      description: |
+        ok — fresh data.
+        degraded — data present but stale, or partially assembled.
+        unavailable — no usable data; `data` is absent and `error` is set.
+
+    Section:
+      description: |
+        A single backend's contribution to an aggregate. Callers MUST branch on
+        `status` before reading `data`.
+      type: object
+      required: [status, source]
+      properties:
+        status: { $ref: "#/components/schemas/SectionStatus" }
+        source: { $ref: "#/components/schemas/SourceName" }
+        data: {}
+        error:
+          type: string
+          description: Human-readable cause. Present when status is degraded or unavailable.
+        fetchedAt: { type: string, format: date-time }
+        stale:
+          type: boolean
+          default: false
+          description: Served from cache after a refresh attempt failed.
+
+    # ---- platform
+
+    PlatformOverview:
+      type: object
+      required: [nodes, capacity, services, projects, backups]
+      properties:
+        nodes:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  type: array
+                  items: { $ref: "#/components/schemas/Node" }
+        capacity:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/Capacity"
+        services:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  type: array
+                  items: { $ref: "#/components/schemas/SharedService" }
+        projects:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  type: array
+                  items: { $ref: "#/components/schemas/ProjectSummary" }
+        backups:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/BackupStatus"
+
+    Capacity:
+      type: object
+      required: [cpuRequestedRatio, memoryRequestedRatio]
+      properties:
+        cpuRequestedRatio: { type: number, minimum: 0 }
+        memoryRequestedRatio: { type: number, minimum: 0 }
+        cpuCores: { type: number }
+        memoryBytes: { type: integer, format: int64 }
+        source:
+          type: string
+          enum: [metrics-server]
+          description: >
+            metrics-server, which is instantaneous and has no history. The
+            observability endpoint separately supplies bounded historical
+            evidence from the telemetry store.
+
+    Node:
+      type: object
+      required: [name, ready, kubeletVersion]
+      properties:
+        name: { type: string }
+        ready: { type: boolean }
+        kubeletVersion: { type: string }
+        pods: { type: integer }
+        cpuUsedRatio: { type: number }
+        memoryUsedRatio: { type: number }
+        conditions:
+          type: array
+          items: { type: string }
+          description: Non-Ready conditions currently true, e.g. MemoryPressure.
+
+    ObservabilityOverview:
+      type: object
+      required: [schemaVersion, requestedWindow, fidelity, policyVersion, coverage, warnings, workloads, nodes, databases, applications]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        requestedWindow: { $ref: "#/components/schemas/ObservabilityWindow" }
+        dataThrough:
+          type: string
+          format: date-time
+          nullable: true
+          description: Newest evidence included across all signals.
+        fidelity:
+          type: string
+          enum: [complete, aggregated, sampled, mixed]
+        policyVersion: { type: string }
+        coverage:
+          type: array
+          items: { $ref: "#/components/schemas/SignalCoverage" }
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/ObservabilityWarning" }
+        workloads:
+          type: array
+          items: { $ref: "#/components/schemas/ObservedWorkload" }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/ObservedNode" }
+        databases:
+          type: array
+          description: PostgreSQL endpoints observed within the requested window.
+          items: { $ref: "#/components/schemas/ObservedDatabaseEndpoint" }
+        storageBroker:
+          nullable: true
+          description: Storage-broker service evidence, or null when the requested window contains none.
+          allOf:
+            - $ref: "#/components/schemas/ObservedStorageBroker"
+        identity:
+          nullable: true
+          description: Zitadel authentication service evidence, or null when the requested window contains none.
+          allOf:
+            - $ref: "#/components/schemas/ObservedIdentity"
+        applications:
+          type: array
+          description: Complete operation summaries and bounded correlated execution samples for instrumented tenant services.
+          items: { $ref: "#/components/schemas/ObservedApplicationService" }
+
+    ObservedApplicationService:
+      type: object
+      required: [namespace, service, lastSeen, executions, successful, rejected, failed, complete, detailsTruncated, operations, samples, standaloneLogs]
+      properties:
+        namespace: { type: string }
+        service: { type: string }
+        lastSeen: { type: string, format: date-time }
+        executions: { type: integer, format: int64, minimum: 0 }
+        successful: { type: integer, format: int64, minimum: 0 }
+        rejected: { type: integer, format: int64, minimum: 0 }
+        failed: { type: integer, format: int64, minimum: 0 }
+        p95DurationSeconds: { type: number, nullable: true }
+        complete:
+          type: boolean
+          description: False when producer, compaction, or retained sample limits lost evidence for the service.
+        detailsTruncated:
+          type: boolean
+          description: True when this bounded response omitted operation or example detail while keeping service totals.
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/ObservedApplicationOperation" }
+        samples:
+          type: array
+          items: { $ref: "#/components/schemas/ObservedApplicationExecution" }
+        standaloneLogs:
+          type: array
+          description: Bounded ERROR/FATAL records that had no trace context or whose correlated root was unavailable.
+          items: { $ref: "#/components/schemas/ObservedApplicationLog" }
+
+    ObservedApplicationOperation:
+      type: object
+      required: [operation, kind, executions, successful, rejected, failed, sampledExecutions]
+      properties:
+        operation: { type: string }
+        kind: { type: string, enum: [http, crawler, render, job, message, unknown] }
+        executions: { type: integer, format: int64, minimum: 0 }
+        successful: { type: integer, format: int64, minimum: 0 }
+        rejected: { type: integer, format: int64, minimum: 0 }
+        failed: { type: integer, format: int64, minimum: 0 }
+        p95DurationSeconds: { type: number, nullable: true }
+        sampledExecutions: { type: integer, format: int64, minimum: 0 }
+
+    ObservedApplicationExecution:
+      type: object
+      required: [traceId, operation, outcome, reason, complete, startedAt, spans, logs]
+      properties:
+        traceId: { type: string }
+        operation: { type: string }
+        outcome: { type: string, enum: [success, rejected, error, retryable_failure, exhausted_failure, unknown] }
+        reason: { type: string, enum: [failure, error_log, slow, healthy_sample, sampled] }
+        complete:
+          type: boolean
+          description: False when a late or missing correlated signal made this execution bundle partial.
+        startedAt: { type: string, format: date-time }
+        durationSeconds: { type: number, nullable: true }
+        spans:
+          type: array
+          items: { $ref: "#/components/schemas/ObservedApplicationSpan" }
+        logs:
+          type: array
+          items: { $ref: "#/components/schemas/ObservedApplicationLog" }
+
+    ObservedApplicationSpan:
+      type: object
+      required: [service, spanId, name, startedAt, status]
+      properties:
+        service: { type: string }
+        spanId: { type: string }
+        parentSpanId: { type: string, nullable: true }
+        name: { type: string }
+        startedAt: { type: string, format: date-time }
+        durationSeconds: { type: number, nullable: true }
+        status: { type: string, enum: [ok, error] }
+        errorType: { type: string, nullable: true }
+        serverAddress: { type: string, nullable: true }
+
+    ObservedApplicationLog:
+      type: object
+      required: [timestamp, severity, message]
+      properties:
+        timestamp: { type: string, format: date-time }
+        severity: { type: string }
+        message: { type: string }
+
+    ObservabilityWindow:
+      type: object
+      required: [from, to]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+
+    SignalCoverage:
+      type: object
+      required: [signal, status, rows]
+      properties:
+        signal: { type: string, enum: [logs, metrics, traces] }
+        status: { type: string, enum: [ok, gap] }
+        rows: { type: integer, minimum: 0 }
+        newest: { type: string, format: date-time, nullable: true }
+        note: { type: string, nullable: true }
+
+    ObservabilityWarning:
+      type: object
+      required: [lastSeen, namespace, reason, kind, resource, message, occurrences]
+      properties:
+        lastSeen: { type: string, format: date-time }
+        namespace: { type: string }
+        reason: { type: string }
+        kind: { type: string }
+        resource: { type: string }
+        message: { type: string }
+        occurrences: { type: integer, minimum: 1 }
+
+    ObservedWorkload:
+      type: object
+      required: [namespace, workload, sampledAt]
+      properties:
+        namespace: { type: string }
+        workload: { type: string }
+        sampledAt: { type: string, format: date-time }
+        cpuCores: { type: number, nullable: true }
+        memoryWorkingSetBytes: { type: integer, format: int64, nullable: true }
+        restarts: { type: integer, format: int64, nullable: true }
+        readyContainers: { type: integer, nullable: true }
+        totalContainers: { type: integer, nullable: true }
+        ready: { type: boolean, nullable: true }
+
+    ObservedNode:
+      type: object
+      required: [node, sampledAt]
+      properties:
+        node: { type: string }
+        sampledAt: { type: string, format: date-time }
+        ready: { type: boolean, nullable: true }
+        cpuCores: { type: number, nullable: true }
+        memoryWorkingSetBytes: { type: integer, format: int64, nullable: true }
+
+    ObservedDatabaseEndpoint:
+      type: object
+      required: [workload, role, observedFrom, sampledAt]
+      properties:
+        workload: { type: string }
+        role: { type: string, enum: [primary, replica, unknown] }
+        observedFrom:
+          type: string
+          format: date-time
+          description: Oldest PostgreSQL sample contributing to this endpoint summary.
+        sampledAt: { type: string, format: date-time }
+        available: { type: boolean, nullable: true }
+        connections: { type: integer, format: int64, nullable: true }
+        maxConnections: { type: integer, format: int64, nullable: true }
+        sizeBytes: { type: integer, format: int64, nullable: true }
+        growthBytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Net database-size change between the first and last samples in the requested window.
+        transactionsInWindow: { type: integer, format: int64, nullable: true }
+        rollbacksInWindow: { type: integer, format: int64, nullable: true }
+        conflictsInWindow: { type: integer, format: int64, nullable: true }
+        deadlocksInWindow: { type: integer, format: int64, nullable: true }
+        tempBytesInWindow: { type: integer, format: int64, nullable: true }
+        replicationLagSeconds:
+          type: number
+          nullable: true
+          description: Exporter-reported replay lag behind the primary, in seconds.
+
+    ObservedStorageBroker:
+      type: object
+      required:
+        - observedFrom
+        - sampledAt
+        - targetsObservedInWindow
+        - targetsCurrent
+        - targetsScrapeable
+      properties:
+        observedFrom:
+          type: string
+          format: date-time
+          description: Oldest storage-broker sample contributing to this summary.
+        sampledAt:
+          type: string
+          format: date-time
+          description: Newest storage-broker telemetry sample in the requested window.
+        targetsObservedInWindow:
+          type: integer
+          minimum: 0
+          description: Distinct broker metrics targets seen during the window, including replaced pods.
+        targetsCurrent:
+          type: integer
+          minimum: 0
+          description: Targets sampled near the newest metric evidence in the query.
+        targetsScrapeable:
+          type: integer
+          minimum: 0
+          description: Current targets whose metrics endpoint was scrapeable; this does not prove request or S3 availability.
+        requestsInWindow: { type: integer, format: int64, nullable: true }
+        successfulRequestsInWindow: { type: integer, format: int64, nullable: true }
+        rejectedRequestsInWindow:
+          type: integer
+          format: int64
+          nullable: true
+          description: Caller input, authentication, authorization, and policy rejections.
+        errorRequestsInWindow:
+          type: integer
+          format: int64
+          nullable: true
+          description: Broker responses with a 5xx status.
+        successP95LatencySeconds:
+          type: number
+          nullable: true
+          description: Upper histogram bound containing 95 percent of successful requests, or the largest finite lower bound when overflow is true.
+        successP95LatencyOverflow:
+          type: boolean
+          nullable: true
+          description: True when p95 is above the largest finite latency bucket; null when p95 cannot be calculated safely.
+
+    ObservedIdentity:
+      type: object
+      required:
+        - observedFrom
+        - sampledAt
+        - targetsObservedInWindow
+        - targetsCurrent
+        - targetsScrapeable
+        - routes
+      properties:
+        observedFrom:
+          type: string
+          format: date-time
+          description: Oldest Zitadel sample contributing to this summary.
+        sampledAt:
+          type: string
+          format: date-time
+          description: Newest Zitadel telemetry sample in the requested window.
+        targetsObservedInWindow:
+          type: integer
+          minimum: 0
+          description: Distinct Zitadel metrics targets seen during the window, including replaced pods.
+        targetsCurrent:
+          type: integer
+          minimum: 0
+          description: Targets sampled near the newest metric evidence in the query.
+        targetsScrapeable:
+          type: integer
+          minimum: 0
+          description: Current targets whose metrics endpoint was scrapeable; this does not prove authentication or database availability.
+        httpRequestsInWindow:
+          type: integer
+          format: int64
+          nullable: true
+          description: All Zitadel HTTP requests across safely comparable counters, including management traffic.
+        routes:
+          type: array
+          description: Only the fixed public authentication routes retained by the collector.
+          items: { $ref: "#/components/schemas/ObservedIdentityRoute" }
+        requestP95LatencySeconds:
+          type: number
+          nullable: true
+          description: Upper histogram bound containing 95 percent of all Zitadel HTTP requests, or the largest finite lower bound when overflow is true.
+        requestP95LatencyOverflow:
+          type: boolean
+          nullable: true
+          description: True when p95 is above the largest finite latency bucket; null when p95 cannot be calculated safely.
+
+    ObservedIdentityRoute:
+      type: object
+      required: [route]
+      properties:
+        route: { type: string, enum: [authorize, token, userinfo] }
+        requestsInWindow: { type: integer, format: int64, nullable: true }
+        successfulRequestsInWindow:
+          type: integer
+          format: int64
+          nullable: true
+          description: Responses below 400, including the authorize redirect.
+        rejectedRequestsInWindow:
+          type: integer
+          format: int64
+          nullable: true
+          description: Responses from 400 through 499; these can be expected caller or credential rejection, not a service failure.
+        errorRequestsInWindow:
+          type: integer
+          format: int64
+          nullable: true
+          description: Responses at or above 500.
+
+    SharedService:
+      type: object
+      required: [name, ready, replicas, owner]
+      properties:
+        name: { type: string }
+        chart: { type: string, description: From the helm.sh/chart label. }
+        appVersion: { type: string }
+        ready: { type: integer }
+        replicas: { type: integer }
+        owner:
+          type: string
+          enum: [opentofu]
+          description: Every infra service is Terraform-declared, so its version here reflects what git says it should be.
+
+    BackupStatus:
+      type: object
+      # lastSuccessAt is deliberately optional rather than required-and-nullable:
+      # a required field generates as a non-pointer, and "never backed up" would
+      # then render as the zero time (year 1) instead of as absent.
+      required: [schedule]
+      properties:
+        lastSuccessAt: { type: string, format: date-time, nullable: true }
+        schedule: { type: string }
+        restoreVerifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null means no restore has ever been verified. Surface that plainly rather than hiding it.
+
+    # ---- projects
+
+    ProjectSummary:
+      type: object
+      required: [name, namespace, health]
+      properties:
+        name: { type: string }
+        namespace: { type: string }
+        schema: { type: string }
+        health: { type: string, enum: [ok, degraded, down, unknown] }
+        podsReady: { type: integer }
+        podsDesired: { type: integer }
+        lastDeployAt: { type: string, format: date-time, nullable: true }
+
+    ProjectOverview:
+      type: object
+      required: [name, workloads, quota, database, storage, auth, domains]
+      properties:
+        name: { type: string }
+        namespace: { type: string }
+        image: { type: string, nullable: true }
+        workloads:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  type: array
+                  items: { $ref: "#/components/schemas/Workload" }
+        quota:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/Quota"
+        database:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/DatabaseSummary"
+        storage:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/StorageSummary"
+        auth:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/AuthSummary"
+        domains:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  type: array
+                  items: { $ref: "#/components/schemas/Hostname" }
+
+    Quota:
+      type: object
+      properties:
+        cpuUsedRatio: { type: number }
+        memoryUsedRatio: { type: number }
+        cpuHard: { type: string }
+        memoryHard: { type: string }
+        podsUsed: { type: integer }
+        podsHard: { type: integer }
+
+    Workload:
+      type: object
+      required: [name, kind, ready, phase]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [Deployment, StatefulSet, CronJob, Job, Pod] }
+        ready: { type: integer }
+        replicas: { type: integer }
+        phase: { type: string }
+        image: { type: string }
+        chart:
+          description: >
+            Helm chart, read from the `helm.sh/chart` label. Present for
+            anything Helm installed, tenant or platform alike.
+          type: string
+        appVersion: { type: string }
+        restarts: { type: integer }
+        startedAt: { type: string, format: date-time, nullable: true }
+        containers:
+          type: array
+          items: { type: string }
+        pods:
+          description: >
+            The pods this controller currently owns. `ready`/`replicas` says how
+            many there should be; this says which actually exist and what state
+            each is in.
+          type: array
+          items: { $ref: "#/components/schemas/Pod" }
+
+    Pod:
+      type: object
+      required: [name, phase]
+      properties:
+        name: { type: string }
+        phase: { type: string }
+        ready: { type: boolean }
+        restarts: { type: integer }
+        node: { type: string }
+        startedAt: { type: string, format: date-time, nullable: true }
+
+    Release:
+      type: object
+      required: [revision, status, source]
+      properties:
+        revision: { type: integer, description: Helm release revision. }
+        status:
+          type: string
+          enum: [deployed, superseded, failed, pending, progressing, unknown]
+        chartVersion: { type: string, nullable: true }
+        appVersion: { type: string, nullable: true }
+        image: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time }
+        commit:
+          type: string
+          nullable: true
+          description: Resolved from the running image tag, which is the commit SHA. Null when GitHub is unreachable.
+        actor: { type: string, nullable: true, description: The GitHub Actions run's triggering actor. }
+        durationSeconds: { type: integer, nullable: true, description: From the GitHub Actions run's start and end timestamps. }
+        source:
+          type: string
+          enum: [helm, helm+github]
+          description: |
+            `helm` means only the release ConfigMap was readable. `helm+github`
+            means the commit was resolved to a GitHub Actions run, supplying
+            actor and duration.
+
+            The join key is the image tag: tenant CI runs
+            `--set image.tag=${{ github.sha }}`, so the tag IS the commit SHA
+            and matches the run's `head_sha`. No callback from tenant CI is
+            required — this works for every tenant that follows the standard
+            deployment guide.
+
+    # ---- database
+
+    DatabaseSummary:
+      type: object
+      required: [schema, sizeBytes, tableCount]
+      properties:
+        schema: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        tableCount: { type: integer }
+        connections: { type: integer }
+        connectionLimit: { type: integer, nullable: true }
+        role: { type: string, description: The tenant's PostgreSQL role. }
+
+    Table:
+      type: object
+      required: [name, rowsEstimate, sizeBytes]
+      properties:
+        name: { type: string }
+        rowsEstimate:
+          type: integer
+          format: int64
+          description: From pg_class.reltuples. An estimate, never exact — see the operation description.
+        sizeBytes: { type: integer, format: int64 }
+        indexCount: { type: integer }
+        hasSingleColumnPrimaryKey:
+          type: boolean
+          description: False means rows cannot be browsed; listRows returns 409.
+
+    RowPage:
+      type: object
+      required: [schema, table, columns, rows, maskedColumns, truncated]
+      properties:
+        schema: { type: string }
+        table: { type: string }
+        columns:
+          type: array
+          items: { $ref: "#/components/schemas/Column" }
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        maskedColumns:
+          type: array
+          items: { type: string }
+          description: Columns returned as null by the masking rule. Always surface these in the UI so a null is not mistaken for absent data.
+        truncated: { type: boolean, description: True when more rows exist past this page. }
+        nextCursor: { type: string, nullable: true }
+        fetchedAt: { type: string, format: date-time }
+
+    Column:
+      type: object
+      required: [name, dataType, masked]
+      properties:
+        name: { type: string }
+        dataType: { type: string }
+        nullable: { type: boolean }
+        masked:
+          type: boolean
+          description: >
+            True when platform_reader has no SELECT privilege on this column, so
+            the value is projected as NULL. The owner controls this with
+            column-level GRANT; the console never decides what is sensitive.
+
+    DatabaseActivity:
+      type: object
+      required: [connections, active, idleInTransaction, waitingLocks]
+      properties:
+        connections: { type: integer }
+        active: { type: integer }
+        idleInTransaction: { type: integer }
+        waitingLocks: { type: integer }
+        longestRunningMs: { type: integer, nullable: true }
+        queries:
+          type: array
+          items:
+            type: object
+            required: [pid, state, durationMs]
+            properties:
+              pid: { type: integer }
+              state: { type: string }
+              durationMs: { type: integer }
+              query:
+                type: string
+                description: >
+                  The leading SQL keyword only (SELECT, UPDATE, ...), never statement
+                  text: pg_stat_activity stores literals already substituted.
+
+    # ---- storage
+
+    StorageSummary:
+      type: object
+      required: [bucket, objectCount, bytesUsed]
+      properties:
+        bucket: { type: string }
+        objectCount: { type: integer, format: int64 }
+        bytesUsed: { type: integer, format: int64 }
+        endpoint: { type: string }
+
+    StoragePolicy:
+      type: object
+      required: [namespace, bucket, grants]
+      properties:
+        namespace: { type: string }
+        bucket: { type: string }
+        grants:
+          type: array
+          items:
+            type: object
+            required: [prefix, operations, ttlSeconds]
+            properties:
+              prefix: { type: string }
+              operations:
+                type: array
+                items: { type: string, enum: [get, put, delete] }
+              ttlSeconds: { type: integer }
+              requiresUser:
+                type: boolean
+                description: True when the grant is scoped by the verified Zitadel subject.
+
+    # ---- identity
+
+    AuthSummary:
+      type: object
+      required: [org, applications, consoleUrl]
+      properties:
+        org: { type: string }
+        orgId: { type: string }
+        userCount: { type: integer, nullable: true }
+        applications:
+          type: array
+          items:
+            type: object
+            required: [name, type]
+            properties:
+              name: { type: string }
+              type: { type: string }
+              clientId: { type: string }
+              redirectUris:
+                type: array
+                items: { type: string }
+        consoleUrl:
+          type: string
+          format: uri
+          description: Deep link for runtime inspection and break-glass access; managed structure is owned by terraform/identity.
+
+    # ---- edge
+
+    EdgeOverview:
+      type: object
+      required: [tunnel, hostnames]
+      properties:
+        tunnel:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/TunnelStatus"
+        # Enveloped, not bare. These were once plain `zones` and `recordCount`
+        # fields, which meant a failed Cloudflare read rendered "0 zones, 0 DNS
+        # records" — indistinguishable from a genuinely empty account, and the
+        # exact confident-zero this API exists to avoid.
+        hostnames:
+          allOf:
+            - $ref: "#/components/schemas/Section"
+            - type: object
+              properties:
+                data:
+                  $ref: "#/components/schemas/EdgeHostnames"
+
+    EdgeHostnames:
+      type: object
+      required: [zones, recordCount, records]
+      properties:
+        zones:
+          description: >
+            Zone names as Cloudflare reports them, not inferred from record
+            suffixes.
+          type: array
+          items: { type: string }
+        recordCount:
+          description: >
+            Every record in every visible zone, of every type. This counts the
+            DNS estate, so it includes the MX and TXT records that carry mail
+            and domain verification.
+          type: integer
+        records:
+          type: array
+          items: { $ref: "#/components/schemas/DnsRecord" }
+
+    DnsRecord:
+      description: >
+        One Cloudflare DNS record as it exists at the edge right now. `comment`
+        is the field Terraform writes when it declares a record, so it is the
+        available evidence of intent — this API does not read Terraform state.
+      type: object
+      required: [zone, name, type, proxied]
+      properties:
+        zone: { type: string }
+        name: { type: string }
+        type: { type: string }
+        content: { type: string, nullable: true }
+        proxied: { type: boolean }
+        comment: { type: string, nullable: true }
+
+    TunnelStatus:
+      type: object
+      required: [healthy, connectors]
+      properties:
+        healthy: { type: boolean }
+        connectors: { type: integer }
+        name: { type: string }
+
+    Hostname:
+      type: object
+      required: [host, recordType, tlsSource]
+      properties:
+        host: { type: string }
+        recordType: { type: string }
+        routesTo: { type: string, nullable: true, description: namespace/service, resolved from the Ingress. }
+        tlsSource:
+          type: string
+          enum: [cloudflare-universal, cert-manager, none]
+          description: |
+            Tunnel-fronted infra hostnames terminate TLS at the Cloudflare edge
+            and have no cert-manager Certificate. Do not render an expiry for
+            cloudflare-universal from Kubernetes.
+        certExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Only meaningful when tlsSource is cert-manager.
+
+    # ---- events

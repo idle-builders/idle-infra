@@ -1,0 +1,79 @@
+# KEDA is a cluster add-on for example tenant crawler execution capacity. Feed policy,
+# queue eligibility, and concurrency limits remain application/database-owned.
+crds:
+  install: true
+
+watchNamespace: ""
+
+image:
+  pullPolicy: IfNotPresent
+
+enableServiceLinks: false
+
+rbac:
+  enabledCustomScaledRefKinds: false
+
+permissions:
+  operator:
+    restrict:
+      secret: true
+      namesAllowList: []
+      serviceAccountTokenCreationRoles: []
+      allowAllServiceAccountTokenCreation: false
+  metricServer:
+    restrict:
+      secret: true
+
+# The chart's built-in policies deliberately allow all in-cluster scaler
+# destinations. terraform/main/keda.tf instead declares the narrower example tenant
+# scheduler-only policy required here.
+networkPolicy:
+  enabled: false
+
+nodeSelector: {}
+
+resources:
+  operator:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  metricServer:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  webhooks:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
+
+prometheus:
+  metricServer:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+    podMonitor:
+      enabled: false
+  operator:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+    podMonitor:
+      enabled: false
+    prometheusRules:
+      enabled: false
+  webhooks:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+    prometheusRules:
+      enabled: false
+

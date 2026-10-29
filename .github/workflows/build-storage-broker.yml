@@ -1,0 +1,85 @@
+name: Build storage-broker image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docker/storage-broker/**"
+      - "scripts/ducklake-storage-broker-probe.mjs"
+      - "scripts/check-ghcr-pull.sh"
+      - ".github/workflows/build-storage-broker.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "docker/storage-broker/**"
+      - "scripts/ducklake-storage-broker-probe.mjs"
+      - "scripts/check-ghcr-pull.sh"
+      - ".github/workflows/build-storage-broker.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: idle-builders/idle-infra/storage-broker
+
+jobs:
+  test:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    # Debian-based golang (ships git, which actions/checkout needs in-container).
+    container: golang:1.25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Test
+        run: cd docker/storage-broker && go vet ./... && go test -count=1 ./...
+
+      - name: Real DuckLake protocol probe
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends nodejs npm
+          probe_dir="$(mktemp -d)"
+          npm install --silent --prefix "$probe_dir" @duckdb/node-api@1.5.4-r.1
+          cd docker/storage-broker
+          DUCKDB_NODE_API_ROOT="$probe_dir/node_modules/@duckdb/node-api" \
+            go test -run TestRealDuckLakeAgainstGovernedS3Surface -count=1 -v
+
+  build:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: docker/storage-broker
+          push: ${{ github.event_name == 'push' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/idle-builders/idle-infra
+            org.opencontainers.image.description=Storage broker for credential-mediated S3 presigned URLs
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v0

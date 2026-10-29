@@ -1,0 +1,106 @@
+# Real services for the infra-console integration tests.
+#
+# There are no stubs in this repo's console tests. Every source is exercised
+# against the actual software the platform runs, at the version the platform
+# runs it:
+#
+#   PostgreSQL 17     — matches the Bitnami chart's major
+#   Zitadel v4.14.0   — the appVersion of chart 10.0.2 (terraform/main/main.tf)
+#
+# Kubernetes is not here: the tests use the real cluster from KUBECONFIG
+# (rancher-desktop locally), because a fake API server is exactly the kind of
+# thing that hides a wrong field path.
+#
+#   docker compose -f integration/compose.yaml up -d
+#   integration/up.sh          # waits, bootstraps Zitadel, seeds data, prints env
+
+name: infra-console-integration
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: integration
+      POSTGRES_DB: postgres
+    ports: ["55432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Zitadel needs its own database user; it manages its schema itself.
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v4.14.0
+    command: >
+      start-from-init
+      --masterkeyFromEnv
+      --tlsMode disabled
+    environment:
+      ZITADEL_MASTERKEY: MasterkeyNeedsToHave32Characters
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_EXTERNALPORT: "8081"
+      ZITADEL_TLS_ENABLED: "false"
+      ZITADEL_DATABASE_POSTGRES_HOST: postgres
+      ZITADEL_DATABASE_POSTGRES_PORT: "5432"
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: postgres
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: integration
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: postgres
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: integration
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      # Bootstrap an org and a machine user with a PAT written to a file. This
+      # is how the console's service-user credential is obtained in reality,
+      # so the test uses the same mechanism rather than a hand-made token.
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: hyperidle
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: root
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: RootPassword1!
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: console
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: infra-console
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2100-01-01T00:00:00Z"
+      # Written to a tmpfs, not a named volume: a named volume is root-owned
+      # and the setup migration fails with "permission denied". The harness
+      # reads the token back with `docker compose exec ... cat`.
+      ZITADEL_FIRSTINSTANCE_PATPATH: /pat/console.pat
+    # A host bind mount, mode 0700 (set by up.sh): the image has no writable
+    # /tmp, a named volume is root-owned (permission denied), and a tmpfs is
+    # invisible to `docker cp`. A host directory is the only one of the three
+    # the harness can read the bootstrap PAT back out of.
+    volumes:
+      - ./.pat:/pat
+    ports: ["8081:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready", "--config", "/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+
+
+  # A real S3-compatible server. The console reads object storage over S3
+  # because every other component that touches Infomaniak storage does, and
+  # because this can actually be verified locally.
+  minio:
+    # Pinned like every other image here. This is the server the object-store
+    # client is validated against, and its ListObjectsV2/HeadBucket and
+    # checksum behaviour is exactly what objectstore.go compensates for — an
+    # unpinned bump would silently change what the suite proves.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: integration
+      MINIO_ROOT_PASSWORD: integration-secret
+    ports: ["59000:9000"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+

@@ -1,0 +1,105 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage:
+    directory: /tmp/otel-state
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+        max_request_body_size: 4194304
+  prometheus/approved:
+    config:
+      scrape_configs:
+        - job_name: approved
+          scrape_interval: 1s
+          scrape_timeout: 500ms
+          static_configs:
+            - targets: ['${env:PROMETHEUS_TARGET}']
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: '(pg_up|pg_settings_max_connections|pg_stat_database_(numbackends|xact_commit|xact_rollback|conflicts|deadlocks|temp_bytes)|pg_database_size_bytes|pg_replication_(is_replica|lag_seconds|last_replay_seconds)|up|scrape_duration_seconds|scrape_samples_scraped|scrape_samples_post_metric_relabeling)'
+              action: keep
+            - action: labelkeep
+              regex: '(__name__|job|instance|datname)'
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 96
+    spike_limit_mib: 24
+  filter/prometheus_metadata:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name == "scrape_series_added"'
+  resource/node:
+    attributes:
+      - key: collector.node.name
+        value: integration-node
+        action: upsert
+
+exporters:
+  awss3/logs:
+    s3uploader: &s3
+      endpoint: ${env:S3_ENDPOINT}
+      region: us-east-1
+      s3_bucket: telemetry
+      s3_base_prefix: raw/v1/logs
+      s3_prefix: integration-node
+      s3_partition_format: date=%Y-%m-%d/hour=%H/minute=%M
+      s3_force_path_style: true
+      compression: gzip
+    retry_on_failure: &retry
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 0s
+    sending_queue: &queue
+      enabled: true
+      storage: file_storage
+      num_consumers: 1
+      sizer: bytes
+      queue_size: 16777216
+      batch:
+        flush_timeout: 1s
+        sizer: bytes
+        min_size: 1
+        max_size: 8388608
+  awss3/metrics:
+    s3uploader:
+      <<: *s3
+      s3_base_prefix: raw/v1/metrics
+    retry_on_failure: *retry
+    sending_queue: *queue
+  awss3/traces:
+    s3uploader:
+      <<: *s3
+      s3_base_prefix: raw/v1/traces
+    retry_on_failure: *retry
+    sending_queue: *queue
+
+service:
+  extensions: [health_check, file_storage]
+  telemetry:
+    metrics:
+      level: none
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/node]
+      exporters: [awss3/logs]
+    metrics:
+      receivers: [otlp, prometheus/approved]
+      processors: [memory_limiter, filter/prometheus_metadata, resource/node]
+      exporters: [awss3/metrics]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/node]
+      exporters: [awss3/traces]

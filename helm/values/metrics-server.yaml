@@ -1,0 +1,33 @@
+# Resource metrics for kubectl top and future autoscaling.
+replicas: 1
+
+nodeSelector: {}
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: metrics-server
+        topologyKey: kubernetes.io/hostname
+
+# Infomaniak kubelet serving certificates do not contain their InternalIP as a
+# SAN. Requests are still authenticated with Metrics Server's service account,
+# but serving-certificate verification must be disabled for kubelet scraping.
+args:
+  - --kubelet-insecure-tls
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 48Mi
+  limits:
+    cpu: 100m
+    memory: 96Mi
+
+podDisruptionBudget:
+  # A minAvailable: 1 PDB on a singleton prevents voluntary node drains.
+  enabled: false
+
+metrics:
+  enabled: true

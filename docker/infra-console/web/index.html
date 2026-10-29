@@ -1,0 +1,1321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>infra console</title>
+<!--
+  The console UI, matching the approved design in
+
+  Deliberately one self-contained file with no build step: it keeps the image a
+  single Go binary with an embedded asset, and there is no Node toolchain to
+  install, pin or keep current for what is a handful of fetch calls and tables.
+
+  The rule this UI exists to honour: a Section with status != "ok" renders as
+  UNAVAILABLE, never as a zero. `data` is absent on the wire in that case, so
+  reading it blindly would produce "undefined", not a plausible number.
+-->
+<style>
+  :root {
+    --chrome:#EDF0F4; --ground:#F6F8FA; --panel:#FFFFFF; --rule:#DDE2E9;
+    --rule-soft:#E9EDF2; --ink:#12161C; --dim:#626D7E; --faint:#96A0AF;
+    --panel-alt:#F4F6F9;
+    --accent:#17798F; --accent-bg:#E2F1F4; --hover:#EFF2F6;
+    --ok:#1B7048; --ok-bg:#E2F1E9; --warn:#8A5710; --warn-bg:#F8EFDE;
+    --bad:#9A3140; --bad-bg:#F9E8EA;
+    --sans: ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono: ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --chrome:#12161C; --ground:#0D1117; --panel:#161B22; --rule:#262D38;
+      --rule-soft:#1E242D; --ink:#E8ECF2; --dim:#98A2B2; --faint:#6B7686;
+      --panel-alt:#1C222B;
+      --accent:#4FB3C9; --accent-bg:#123039; --hover:#1C222C;
+      --ok:#66C098; --ok-bg:#142C21; --warn:#D6A855; --warn-bg:#2D2415;
+      --bad:#E0868F; --bad-bg:#32181D;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans); -webkit-font-smoothing:antialiased; }
+
+  .topbar { display:flex; align-items:center; gap:.75rem; padding:.7rem 1rem; background:var(--chrome); border-bottom:1px solid var(--rule); flex-wrap:wrap; position:sticky; top:0; z-index:20; }
+  .brand { display:flex; align-items:center; gap:.5rem; font-weight:660; font-size:.88rem; letter-spacing:-.01em; }
+  .brand svg { width:17px; height:17px; }
+  .sep { color:var(--faint); }
+  select { font:inherit; font-size:.85rem; font-weight:600; background:var(--panel); color:var(--ink); border:1px solid var(--rule); border-radius:6px; padding:.32rem .5rem; cursor:pointer; }
+  .spacer { flex:1; }
+  .status { font-size:.75rem; color:var(--faint); font-family:var(--mono); }
+
+  .body { display:grid; grid-template-columns:190px 1fr; min-height:calc(100vh - 46px); }
+  @media (max-width:720px) { .body { grid-template-columns:1fr; } }
+  nav { background:var(--chrome); border-right:1px solid var(--rule); padding:.85rem .6rem; display:flex; flex-direction:column; gap:1px; }
+  .navgrp { font-size:.63rem; letter-spacing:.13em; text-transform:uppercase; color:var(--faint); font-weight:640; padding:.85rem .55rem .3rem; }
+  .navgrp:first-child { padding-top:.2rem; }
+  nav button { display:flex; align-items:center; gap:.55rem; width:100%; font:inherit; font-size:.845rem; font-weight:520; text-align:left; background:none; border:0; border-radius:6px; padding:.42rem .55rem; color:var(--dim); cursor:pointer; }
+  nav button:hover { background:var(--hover); color:var(--ink); }
+  nav button[aria-current="page"] { background:var(--panel); color:var(--ink); font-weight:620; box-shadow:inset 0 0 0 1px var(--rule); }
+  nav button:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  main { padding:1.5rem 1.6rem 3rem; overflow-x:auto; }
+  h1 { font-size:1.3rem; font-weight:680; letter-spacing:-.022em; margin:0 0 .28rem; }
+  h2.band { display:flex; align-items:baseline; gap:.5rem; font-size:.95rem; font-weight:640;
+            letter-spacing:-.01em; margin:1.6rem 0 .7rem; padding-bottom:.4rem; border-bottom:1px solid var(--rule); }
+  h2.band:first-child { margin-top:.9rem; }
+  .bandsub { font-weight:400; font-size:.78rem; color:var(--muted); }
+  .sub { font-size:.82rem; color:var(--dim); margin:0 0 1.25rem; font-family:var(--mono); }
+
+  .grid { display:grid; gap:.8rem; margin-bottom:.8rem; }
+  .g3 { grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); }
+  .g2 { grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); }
+  .card { background:var(--panel); border:1px solid var(--rule); border-radius:8px; padding:.95rem 1rem 1rem; display:flex; flex-direction:column; gap:.55rem; }
+  .label { font-size:.69rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); font-weight:640; }
+  .stat { font-size:1.65rem; font-weight:680; letter-spacing:-.03em; line-height:1; font-variant-numeric:tabular-nums; }
+  .stat small { font-size:.8rem; font-weight:560; color:var(--dim); margin-left:.18em; }
+  .note { font-size:.78rem; color:var(--dim); }
+  .meter { height:5px; border-radius:3px; background:var(--hover); overflow:hidden; }
+  .meter i { display:block; height:100%; border-radius:3px; background:var(--accent); }
+  .meter i.warn { background:var(--warn); }
+  .kv { display:flex; flex-direction:column; gap:.42rem; }
+  .kv div { display:flex; justify-content:space-between; gap:1rem; font-size:.83rem; }
+  .kv .k { color:var(--dim); }
+  .kv .v { font-family:var(--mono); font-size:.78rem; text-align:right; word-break:break-all; }
+
+  .pill { display:inline-flex; align-items:center; font-size:.68rem; font-weight:660; letter-spacing:.05em; text-transform:uppercase; padding:.22em .55em; border-radius:4px; white-space:nowrap; }
+  .p-ok{color:var(--ok);background:var(--ok-bg)} .p-warn{color:var(--warn);background:var(--warn-bg)}
+  .p-bad{color:var(--bad);background:var(--bad-bg)} .p-mute{color:var(--dim);background:var(--hover)}
+
+  .panel { background:var(--panel); border:1px solid var(--rule); border-radius:8px; overflow:hidden; margin-bottom:.8rem; }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; gap:.8rem; padding:.7rem .9rem; border-bottom:1px solid var(--rule); }
+  .panel-title { font-size:.84rem; font-weight:640; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.81rem; font-variant-numeric:tabular-nums; }
+  th, td { text-align:left; padding:.55rem .7rem; border-bottom:1px solid var(--rule-soft); white-space:nowrap; }
+  thead th { font-size:.66rem; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); font-weight:640; border-bottom:1px solid var(--rule); }
+  tbody tr:last-child td { border-bottom:none; }
+  .mono { font-family:var(--mono); font-size:.95em; }
+  table.workload-list { table-layout:fixed; min-width:40rem; }
+  table.workload-list th:nth-child(1), table.workload-list td:nth-child(1) { width:auto; }
+  table.workload-list th:nth-child(2), table.workload-list td:nth-child(2) { width:7rem; }
+  table.workload-list th:nth-child(3), table.workload-list td:nth-child(3) { width:4.2rem; }
+  table.workload-list th:nth-child(4), table.workload-list td:nth-child(4) { width:4.8rem; }
+  table.workload-list th:nth-child(5), table.workload-list td:nth-child(5) { width:4.2rem; }
+  table.workload-list th:nth-child(6), table.workload-list td:nth-child(6) { width:5rem; }
+  table.workload-list th:nth-child(7), table.workload-list td:nth-child(7) { width:4.8rem; }
+  table.workload-list tbody tr:hover td { background:var(--hover); }
+  .workload-cell { display:flex; flex-direction:column; align-items:flex-start; min-width:0; gap:.25rem; }
+  .workload-name { min-width:0; border:0; padding:0; white-space:normal; overflow-wrap:anywhere;
+    background:none; color:var(--ink); font:inherit; font-weight:640; line-height:1.3; text-align:left; cursor:pointer; }
+  .workload-name:hover, .count-button:hover { color:var(--accent); text-decoration:underline; }
+  .workload-name:focus-visible, .service-name:focus-visible, .count-button:focus-visible, .filter-button:focus-visible,
+  .dialog-close:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .workload-state { display:flex; flex-direction:column; align-items:flex-start; gap:.2rem; }
+  .workload-phase { color:var(--dim); font-size:.7rem; }
+  .count-button { border:0; background:none; color:var(--ink); font:inherit; padding:0; cursor:pointer; }
+  .workload-toolbar { display:flex; align-items:center; justify-content:space-between; gap:.8rem;
+    padding:.65rem .8rem; border-bottom:1px solid var(--rule); }
+  .filter-group { display:inline-flex; gap:.2rem; padding:.18rem; border:1px solid var(--rule);
+    border-radius:6px; background:var(--panel-alt); }
+  .filter-button { border:0; border-radius:4px; background:transparent; color:var(--dim);
+    padding:.3rem .55rem; font:inherit; font-size:.75rem; font-weight:620; cursor:pointer; }
+  .filter-button[aria-pressed="true"] { background:var(--panel); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  .history-state { color:var(--dim); font-size:.72rem; }
+  table.dns { table-layout:fixed; min-width:58rem; }
+  table.dns th:nth-child(2), table.dns td:nth-child(2) { width:5.5rem; }
+  table.dns th:nth-child(3), table.dns td:nth-child(3) { width:20rem; }
+  table.dns th:nth-child(4), table.dns td:nth-child(4) { width:7rem; }
+  table.dns th:nth-child(5), table.dns td:nth-child(5) { width:16rem; }
+  table.dns td.podname, table.dns td.trunc { overflow:hidden; text-overflow:ellipsis; }
+  table.dns tr.ctrl > td { background:var(--panel-alt); border-bottom:1px solid var(--rule); padding:.5rem .7rem; }
+  table.dns tr.ctrl .pill { margin-left:.5rem; vertical-align:middle; }
+  .ctrl-name { font-weight:640; font-size:.82rem; margin-right:.5rem; }
+  .ctrl-img { color:var(--faint); font-size:.72rem; margin-left:.15rem; }
+  .muted { color:var(--dim); }
+  .masked { color:var(--faint); letter-spacing:.08em; }
+
+  dialog { width:min(50rem,calc(100vw - 2rem)); max-height:calc(100vh - 2rem); padding:0;
+    border:1px solid var(--rule); border-radius:10px; background:var(--panel); color:var(--ink);
+    box-shadow:0 18px 60px rgba(0,0,0,.25); }
+  dialog::backdrop { background:rgba(13,17,23,.52); }
+  .dialog-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;
+    padding:1rem 1.1rem .8rem; border-bottom:1px solid var(--rule); }
+  .dialog-head h2 { margin:0 0 .35rem; font-size:1.05rem; }
+  .dialog-close { border:1px solid var(--rule); border-radius:6px; background:var(--panel);
+    color:var(--ink); padding:.35rem .6rem; font:inherit; cursor:pointer; }
+  .dialog-body { padding:1rem 1.1rem 1.2rem; overflow-y:auto; max-height:calc(100vh - 7rem); }
+  .dialog-section { margin-top:1.1rem; }
+  .dialog-section:first-child { margin-top:0; }
+  .dialog-section h3 { margin:0 0 .5rem; font-size:.82rem; }
+  .detail-meta { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.7rem; }
+  .detail-image { color:var(--dim); font-family:var(--mono); font-size:.72rem; word-break:break-all; }
+  .warning-list { display:flex; flex-direction:column; border:1px solid var(--rule); border-radius:7px; overflow:hidden; }
+  .warning-item { padding:.7rem .8rem; border-bottom:1px solid var(--rule-soft); }
+  .warning-item:last-child { border-bottom:0; }
+  .warning-meta { display:flex; align-items:center; flex-wrap:wrap; gap:.4rem; margin-bottom:.35rem; }
+  .warning-resource { color:var(--dim); font-family:var(--mono); font-size:.72rem; overflow-wrap:anywhere; }
+  .warning-message { margin:.35rem 0 0; font-size:.8rem; line-height:1.4; overflow-wrap:anywhere; }
+  .service-name { border:0; padding:0; background:none; color:var(--ink); font:inherit;
+    font-weight:640; cursor:pointer; text-align:left; }
+  .service-name:hover { color:var(--accent); text-decoration:underline; }
+  .sample-list { display:flex; flex-direction:column; gap:.65rem; }
+  .sample { border:1px solid var(--rule); border-radius:7px; padding:.7rem .8rem; }
+  .sample-head { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem; margin-bottom:.4rem; }
+  .sample-log { margin-top:.4rem; font-family:var(--mono); font-size:.72rem; overflow-wrap:anywhere; }
+
+  /* An unavailable source states itself. It must never look like a zero. */
+  .unavailable { background:var(--panel); border:1px dashed var(--rule); border-radius:8px; padding:1rem; display:flex; flex-direction:column; gap:.35rem; }
+  .unavailable .label { color:var(--bad); }
+  .unavailable .why { font-size:.78rem; color:var(--dim); font-family:var(--mono); word-break:break-word; }
+  .coverage-gap { margin:.8rem 0; }
+  .coverage-gap .label { color:var(--warn); }
+  .stale { font-size:.68rem; color:var(--warn); font-weight:660; text-transform:uppercase; letter-spacing:.05em; }
+  .empty { padding:2rem 1rem; text-align:center; color:var(--dim); font-size:.86rem; }
+  .error { margin:1rem 0; padding:1rem; border:1px solid var(--bad); border-radius:8px; background:var(--bad-bg); color:var(--bad); font-size:.85rem; }
+  pre.logs { margin:0; padding:.9rem; background:var(--panel); font-family:var(--mono); font-size:.75rem; line-height:1.5; overflow-x:auto; max-height:60vh; white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <rect x="11.5" y="1.5" width="7" height="7" rx="1.6" fill="currentColor"/>
+      <rect x="1.5" y="11.5" width="7" height="7" rx="1.6" fill="currentColor"/>
+      <rect x="11.5" y="11.5" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    </svg>
+    infra
+  </span>
+  <span class="spacer"></span>
+  <label id="tenantbox" hidden><span class="sep">tenant</span>
+    <select id="tenant" aria-label="Filter by tenant"></select>
+  </label>
+  <span class="status" id="status"></span>
+</div>
+
+<div class="body">
+  <nav id="nav" aria-label="Section"></nav>
+  <main id="main"><div class="empty">Loading&hellip;</div></main>
+</div>
+
+<dialog id="workload-detail" aria-labelledby="workload-detail-title">
+  <div class="dialog-head">
+    <div>
+      <h2 id="workload-detail-title">Workload</h2>
+      <div id="workload-detail-summary"></div>
+    </div>
+    <button class="dialog-close" type="button" aria-label="Close workload details">Close</button>
+  </div>
+  <div class="dialog-body" id="workload-detail-body"></div>
+</dialog>
+
+<dialog id="service-detail" aria-labelledby="service-detail-title">
+  <div class="dialog-head">
+    <div>
+      <h2 id="service-detail-title">Service</h2>
+      <div id="service-detail-summary"></div>
+    </div>
+    <button class="dialog-close" type="button" aria-label="Close service details">Close</button>
+  </div>
+  <div class="dialog-body" id="service-detail-body"></div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+
+  var API = "/v1";
+  var state = { section: "overview", tenant: "*", projects: [] };
+  var workloadDataByNamespace = {};
+  var workloadEvidenceByNamespace = {};
+  var workloadFilterByNamespace = {};
+  var workloadDialogOpener = null;
+  var applicationEvidenceByNamespace = {};
+  var serviceDialogOpener = null;
+
+  // One nav, always whole. Layers, not modes: every layer holds both platform
+  // facts and tenant facts, so a `tenant: true` view is rendered once per
+  // tenant and the topbar filter narrows it — it does not switch worlds.
+  var NAV = [
+    { grp: "Platform" },
+    { id: "overview", name: "Overview", view: "clusterOverview" },
+    { id: "tenants", name: "Tenants", view: "projectOverview", tenant: true },
+    { grp: "Compute" },
+    { id: "nodes", name: "Nodes", view: "nodes" },
+    { id: "workloads", name: "Workloads", view: "workloads", tenant: true, infra: true },
+    { id: "releases", name: "Releases", view: "releases", tenant: true },
+    { grp: "Applications" },
+    { id: "services", name: "Services", title: "Applications", view: "services", tenant: true },
+    { grp: "Data" },
+    { id: "database", name: "Database", view: "database", tenant: true },
+    { id: "storage", name: "Storage", view: "storage", tenant: true },
+    { grp: "Access" },
+    { id: "auth", name: "Auth", view: "auth", tenant: true },
+    { grp: "Network" },
+    { id: "domains", name: "Domains", view: "domains", tenant: true },
+  ];
+
+  // ---------------------------------------------------------------- helpers
+
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+  }
+
+  // NotConfigured marks a source the deployment has not been given credentials
+  // for. It is a different thing from an outage and reads differently on
+  // screen: "not set up" rather than a red error.
+  function NotConfigured(source) {
+    this.source = source || "this source";
+  }
+
+  function get(path) {
+    return fetch(API + path, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (res) {
+        if (res.status === 401) {
+          // The session expired or was revoked mid-use. Go to sign-in rather
+          // than showing an error the user cannot act on.
+          window.location.href = "/auth/login";
+          throw new Error("Signing in\u2026");
+        }
+        var type = res.headers.get("Content-Type") || "";
+        if (!type.indexOf("text/plain")) return res.text();
+        return res.json().then(function (body) {
+          if (res.status === 501) {
+            throw new NotConfigured(body && body.source);
+          }
+          if (!res.ok) {
+            throw new Error((body && (body.detail || body.title)) || ("HTTP " + res.status));
+          }
+          return body;
+        });
+      });
+  }
+
+  function bytes(n) {
+    if (n === null || n === undefined) return "—";
+    var units = ["B", "kB", "MB", "GB", "TB"], i = 0, v = Number(n);
+    while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+    return (i === 0 ? v : v.toFixed(v < 10 ? 1 : 0)) + " " + units[i];
+  }
+
+  function byteChange(n) {
+    if (n === null || n === undefined) return "—";
+    return (n > 0 ? "+" : (n < 0 ? "−" : "")) + bytes(Math.abs(n));
+  }
+
+  function pct(ratio) {
+    if (ratio === null || ratio === undefined) return null;
+    return Math.round(Number(ratio) * 100);
+  }
+
+  function ago(iso) {
+    if (!iso) return "—";
+    var diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (isNaN(diff)) return "—";
+    if (diff < 90) return Math.max(0, Math.round(diff)) + "s ago";
+    if (diff < 5400) return Math.round(diff / 60) + "m ago";
+    if (diff < 172800) return Math.round(diff / 3600) + "h ago";
+    return Math.round(diff / 86400) + "d ago";
+  }
+
+  function meter(p) {
+    if (p === null) return "";
+    return '<div class="meter"><i class="' + (p >= 80 ? "warn" : "") +
+      '" style="width:' + Math.min(p, 100) + '%"></i></div>';
+  }
+
+  function card(label, body) {
+    return '<div class="card"><span class="label">' + esc(label) + "</span>" + body + "</div>";
+  }
+
+  function panel(title, right, inner) {
+    return '<div class="panel"><div class="panel-head"><span class="panel-title">' +
+      esc(title) + "</span>" + (right || "") + "</div>" + inner + "</div>";
+  }
+
+  function table(head, rows) {
+    if (!rows.length) return '<div class="empty">Nothing to show.</div>';
+    return '<div class="scroll"><table><thead><tr>' +
+      head.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") +
+      "</tr></thead><tbody>" +
+      rows.map(function (r) {
+        return "<tr>" + r.map(function (c) { return "<td>" + c + "</td>"; }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
+  // A Section is only safe to read when status is ok or degraded. Anything
+  // else renders as unavailable — never as zeros.
+  function usable(section) {
+    return section && section.data !== undefined && section.data !== null &&
+      section.status !== "unavailable";
+  }
+
+  function unavailable(label, section) {
+    var why = (section && section.error) || "no data";
+    var src = (section && section.source) || "unknown source";
+    return '<div class="unavailable"><span class="label">' + esc(label) + " — unavailable</span>" +
+      '<span class="why">' + esc(src) + ": " + esc(why) + "</span></div>";
+  }
+
+  function instrumentationGap(label, missing) {
+    return '<div class="unavailable coverage-gap"><span class="label">' + esc(label) +
+      ' observability — not instrumented</span><span class="why">' + esc(missing) +
+      " Pod runtime remains available under Workloads.</span></div>";
+  }
+
+  function instrumentationPartial(label, missing) {
+    return '<div class="unavailable coverage-gap"><span class="label">' + esc(label) +
+      ' observability — partial</span><span class="why">' + esc(missing) +
+      " Pod runtime remains available under Workloads.</span></div>";
+  }
+
+  function staleBadge(section) {
+    return section && section.stale ? '<span class="stale">stale</span>' : "";
+  }
+
+  function healthPill(health) {
+    var cls = { ok: "p-ok", degraded: "p-warn", down: "p-bad" }[health] || "p-mute";
+    return '<span class="pill ' + cls + '">' + esc(health || "unknown") + "</span>";
+  }
+
+  // Historical evidence is expensive to query and is the same committed data
+  // whichever layer asks for it. Share one bounded read across the layer views
+  // for a minute, then let each view select only the evidence it owns.
+  var evidenceCache = { at: 0, promise: null };
+
+  function recentEvidence() {
+    if (evidenceCache.promise && Date.now() - evidenceCache.at < 60000) {
+      return evidenceCache.promise;
+    }
+    evidenceCache.at = Date.now();
+    evidenceCache.promise = get("/observability?windowMinutes=60&limit=100")
+      .catch(function (err) {
+        evidenceCache.promise = null;
+        throw err;
+      });
+    return evidenceCache.promise;
+  }
+
+  function evidenceBadge(d) {
+    if (!d) return '<span class="pill p-warn">history unavailable</span>';
+    var gaps = d.coverage.filter(function (c) { return c.status === "gap"; })
+      .map(function (c) { return c.signal; });
+    return '<span class="pill ' + (gaps.length ? "p-warn" : "p-ok") + '">' +
+      esc(d.fidelity) + (gaps.length ? " · gaps: " + esc(gaps.join(", ")) : "") +
+      " · through " + ago(d.dataThrough) + "</span>";
+  }
+
+  function databaseEvidenceBadge(d) {
+    var metrics = d.coverage.find(function (coverage) { return coverage.signal === "metrics"; });
+    var gap = !metrics || metrics.status === "gap";
+    return '<span class="pill ' + (gap ? "p-warn" : "p-ok") + '">' +
+      esc(d.fidelity) + " metrics · through " + ago(metrics && metrics.newest) + "</span>";
+  }
+
+  function representativeWarnings(warnings) {
+    var firstByType = [], repeats = [], seen = {};
+    warnings.forEach(function (w) {
+      var key = w.kind + "\u0000" + w.reason;
+      if (seen[key]) repeats.push(w);
+      else { seen[key] = true; firstByType.push(w); }
+    });
+    return firstByType.concat(repeats).slice(0, 10);
+  }
+
+  function renderNodeEvidence(d) {
+    if (!d) return unavailable("Recent node evidence", { source: "telemetry", error: "query unavailable" });
+    var warnings = d.warnings.filter(function (w) { return w.kind === "Node"; });
+    var html = panel("Recent node resources", evidenceBadge(d),
+      table(["Node", "Ready", "CPU", "Memory", "Sampled"], d.nodes.map(function (n) {
+        var ready = n.ready == null ? '<span class="pill p-mute">unknown</span>'
+          : (n.ready ? '<span class="pill p-ok">ready</span>' : '<span class="pill p-bad">not ready</span>');
+        return ['<span class="mono">' + esc(n.node) + "</span>", ready,
+          n.cpuCores == null ? "—" : Number(n.cpuCores).toFixed(3) + " cores",
+          bytes(n.memoryWorkingSetBytes), ago(n.sampledAt)];
+      })));
+    if (warnings.length) {
+      var shownNodeWarnings = representativeWarnings(warnings);
+      html += panel("Recent node warnings", '<span class="pill p-warn">' + shownNodeWarnings.length +
+        (warnings.length > shownNodeWarnings.length ? " of " + warnings.length : "") + " groups</span>",
+        table(["Last seen", "Reason", "Resource", "Occurrences", "Message"], shownNodeWarnings.map(function (w) {
+          return [ago(w.lastSeen), esc(w.reason), esc(w.resource), w.occurrences, esc(w.message)];
+        })));
+    }
+    return html;
+  }
+
+  function workloadIsActive(w) {
+    return (w.pods || []).length > 0 || (w.replicas !== undefined && w.replicas > 0) ||
+      (w.kind === "CronJob" && w.ready > 0);
+  }
+
+  function workloadForWarning(warning, workloads) {
+    var exactPod = workloads.find(function (w) {
+      return (w.pods || []).some(function (pod) { return pod.name === warning.resource; });
+    });
+    if (exactPod) return exactPod.name;
+
+    // Kubernetes Events name the immediate resource (Pod, ReplicaSet, Job),
+    // not always its top-level controller. Those generated names preserve the
+    // controller prefix; longest-first avoids assigning `worker-browser-*` to
+    // a shorter `worker` controller.
+    var matches = workloads.filter(function (w) {
+      return warning.resource === w.name || warning.resource.indexOf(w.name + "-") === 0;
+    }).sort(function (a, b) { return b.name.length - a.name.length; });
+    return matches.length ? matches[0].name : null;
+  }
+
+  function warningsForWorkload(evidence, namespace, name, workloads) {
+    if (!evidence) return [];
+    return evidence.warnings.filter(function (warning) {
+      return warning.namespace === namespace && warning.kind !== "Node" &&
+        workloadForWarning(warning, workloads) === name;
+    });
+  }
+
+  function metricForWorkload(evidence, namespace, name) {
+    if (!evidence) return null;
+    return evidence.workloads.find(function (metric) {
+      return metric.namespace === namespace && metric.workload === name;
+    }) || null;
+  }
+
+  function cpu(value) {
+    if (value === null || value === undefined) return "—";
+    var millicores = Number(value) * 1000;
+    return millicores > 0 && millicores < 1 ? "<1m" : Math.round(millicores) + "m";
+  }
+
+  function workloadStatus(w) {
+    var pods = w.pods || [];
+    if (w.kind === "CronJob") {
+      var activeJobs = Math.max(w.ready || 0, pods.length);
+      return '<div class="workload-state"><span class="pill ' + (activeJobs ? "p-ok" : "p-mute") + '">' +
+        (activeJobs ? activeJobs + " active" : "idle") + '</span><span class="workload-phase">' +
+        esc(w.phase) + "</span></div>";
+    }
+    var wanted = w.replicas === undefined ? w.ready : w.replicas;
+    var cls = wanted === 0 ? "p-mute" : (w.ready >= wanted ? "p-ok" : (w.ready === 0 ? "p-bad" : "p-warn"));
+    return '<div class="workload-state"><span class="pill ' + cls + '">' + w.ready + "/" + wanted +
+      ' ready</span><span class="workload-phase">' + esc(w.phase) + "</span></div>";
+  }
+
+  function renderWorkloadTable(namespace) {
+    var workloads = workloadDataByNamespace[namespace] || [];
+    var evidence = workloadEvidenceByNamespace[namespace];
+    var filter = workloadFilterByNamespace[namespace] || "active";
+    var activeCount = workloads.filter(workloadIsActive).length;
+    var visible = filter === "active" ? workloads.filter(workloadIsActive) : workloads;
+    var history = evidence === undefined
+      ? '<span class="pill p-mute">loading history</span>'
+      : (evidence === null ? '<span class="pill p-warn">history unavailable</span>' : evidenceBadge(evidence));
+
+    var toolbar = '<div class="workload-toolbar"><div class="filter-group" role="group" aria-label="Workload visibility">' +
+      '<button class="filter-button" type="button" data-workload-filter="active" data-namespace="' + esc(namespace) +
+      '" aria-pressed="' + (filter === "active") + '">Active ' + activeCount + "</button>" +
+      '<button class="filter-button" type="button" data-workload-filter="all" data-namespace="' + esc(namespace) +
+      '" aria-pressed="' + (filter === "all") + '">All ' + workloads.length + "</button></div>" +
+      '<span class="history-state">Resources are the newest retained sample</span></div>';
+
+    if (!visible.length) {
+      return panel("Workloads", history, toolbar + '<div class="empty">No active workloads. Choose All to see idle or scaled-down controllers.</div>');
+    }
+
+    var rows = visible.map(function (w) {
+      var metric = metricForWorkload(evidence, namespace, w.name);
+      var warnings = warningsForWorkload(evidence, namespace, w.name, workloads);
+      var loading = evidence === undefined;
+      var unavailableHistory = evidence === null;
+      var warningCell = loading ? '<span class="muted">loading</span>'
+        : (unavailableHistory ? '<span class="muted">unavailable</span>'
+          : (warnings.length
+            ? '<button class="count-button" type="button" data-workload-open data-namespace="' + esc(namespace) +
+              '" data-workload="' + esc(w.name) + '">' + warnings.length + (warnings.length === 1 ? " group" : " groups") + "</button>"
+            : '<span class="muted">none</span>'));
+      var sample = loading ? '<span class="muted">loading</span>'
+        : (unavailableHistory ? '<span class="muted">unavailable</span>' : (metric ? ago(metric.sampledAt) : '<span class="muted">none</span>'));
+
+      return '<tr><td><div class="workload-cell"><button class="workload-name" type="button" data-workload-open ' +
+        'data-namespace="' + esc(namespace) + '" data-workload="' + esc(w.name) + '" title="' + esc(w.name) + '">' +
+        esc(w.name) + '</button><span class="pill p-mute">' + esc(w.kind) + "</span></div></td>" +
+        "<td>" + workloadStatus(w) + "</td>" +
+        "<td>" + (loading ? '<span class="muted">loading</span>' : cpu(metric && metric.cpuCores)) + "</td>" +
+        "<td>" + (loading ? '<span class="muted">loading</span>' : bytes(metric && metric.memoryWorkingSetBytes)) + "</td>" +
+        '<td class="num">' + (w.restarts ? '<span class="pill p-warn">' + w.restarts + "</span>" : '<span class="muted">0</span>') + "</td>" +
+        "<td>" + warningCell + "</td><td>" + sample + "</td></tr>";
+    }).join("");
+
+    return panel("Workloads", history, toolbar + '<div class="scroll"><table class="workload-list"><thead><tr>' +
+      "<th>Workload</th><th>Status</th><th>CPU</th><th>Memory</th><th>Restarts</th><th>Warnings</th><th>Sampled</th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table></div>");
+  }
+
+  function renderWarningList(warnings) {
+    if (!warnings.length) return '<div class="empty">No recent warnings for this workload.</div>';
+    return '<div class="warning-list">' + warnings.map(function (warning) {
+      return '<div class="warning-item"><div class="warning-meta"><span class="pill p-warn">' +
+        esc(warning.reason) + '</span><span class="muted">' + ago(warning.lastSeen) + " · " + warning.occurrences +
+        (warning.occurrences === 1 ? " occurrence" : " occurrences") + '</span></div><div class="warning-resource">' +
+        esc(warning.kind + "/" + warning.resource) + '</div><p class="warning-message">' + esc(warning.message) + "</p></div>";
+    }).join("") + "</div>";
+  }
+
+  function openWorkloadDetail(namespace, name) {
+    var workloads = workloadDataByNamespace[namespace] || [];
+    var workload = workloads.find(function (w) { return w.name === name; });
+    if (!workload) return;
+    var evidence = workloadEvidenceByNamespace[namespace];
+    var metric = metricForWorkload(evidence, namespace, name);
+    var warnings = warningsForWorkload(evidence, namespace, name, workloads);
+    var dialog = document.getElementById("workload-detail");
+    dialog.dataset.namespace = namespace;
+    dialog.dataset.workload = name;
+    document.getElementById("workload-detail-title").textContent = name;
+    document.getElementById("workload-detail-summary").innerHTML = '<div class="detail-meta"><span class="pill p-mute">' +
+      esc(workload.kind) + "</span>" + workloadStatus(workload) + "</div>";
+
+    var body = "";
+    if (workload.chart || workload.image) {
+      body += '<div class="dialog-section"><h3>Deployment</h3>' +
+        (workload.chart ? '<div class="detail-image">' + esc(workload.chart) +
+          (workload.appVersion ? " · " + esc(workload.appVersion) : "") + "</div>" : "") +
+        (workload.image ? '<div class="detail-image">' + esc(workload.image) + "</div>" : "") + "</div>";
+    }
+    if (metric) {
+      body += '<div class="dialog-section"><h3>Latest retained resources</h3>' +
+        table(["CPU", "Memory", "Sampled"], [[cpu(metric.cpuCores), bytes(metric.memoryWorkingSetBytes), ago(metric.sampledAt)]]) + "</div>";
+    } else if (evidence === undefined) {
+      body += '<div class="dialog-section"><h3>Latest retained resources</h3><div class="empty">Loading history&hellip;</div></div>';
+    } else if (evidence === null) {
+      body += '<div class="dialog-section"><h3>Latest retained resources</h3><div class="empty">History is unavailable.</div></div>';
+    }
+
+    var pods = workload.pods || [];
+    body += '<div class="dialog-section"><h3>Current pods</h3>' + (pods.length
+      ? table(["Pod", "Phase", "Ready", "Restarts", "Node", "Age"], pods.map(function (pod) {
+          return ['<span class="mono">' + esc(pod.name) + "</span>", esc(pod.phase), pod.ready ? "yes" : "no",
+            pod.restarts || 0, '<span class="mono">' + esc(pod.node || "—") + "</span>", pod.startedAt ? ago(pod.startedAt) : "—"];
+        }))
+      : '<div class="empty">' + (workload.kind === "CronJob" ? "No job running right now." : "No pods exist for this controller.") + "</div>") + "</div>";
+    body += '<div class="dialog-section"><h3>Recent warnings</h3>' +
+      (evidence === undefined ? '<div class="empty">Loading history&hellip;</div>'
+        : (evidence === null ? '<div class="empty">History is unavailable.</div>' : renderWarningList(warnings))) + "</div>";
+    document.getElementById("workload-detail-body").innerHTML = body;
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function renderDatabaseEvidence(d) {
+    if (!d) return unavailable("PostgreSQL service", { source: "telemetry", error: "query unavailable" });
+    if (!d.databases.length) {
+      return instrumentationGap("Database", "No PostgreSQL endpoint metrics exist in this window.");
+    }
+    var down = d.databases.filter(function (endpoint) { return endpoint.available === false; }).length;
+    var unknown = d.databases.filter(function (endpoint) { return endpoint.available == null; }).length;
+    var status = down ? '<span class="pill p-bad">' + down + " unavailable</span>"
+      : (unknown ? '<span class="pill p-warn">availability incomplete</span>'
+        : '<span class="pill p-ok">all endpoints available</span>');
+    return panel("PostgreSQL service", status + databaseEvidenceBadge(d),
+      table(["Endpoint", "Role", "Connections", "Database size", "Transactions", "Errors", "Replication lag", "Sampled"],
+        d.databases.map(function (endpoint) {
+          var connections = endpoint.connections == null ? "—" : endpoint.connections +
+            (endpoint.maxConnections == null ? "" : " / " + endpoint.maxConnections +
+              " (" + Math.round(endpoint.connections / endpoint.maxConnections * 100) + "%)");
+          var transactions = endpoint.transactionsInWindow == null ? "—" :
+            Number(endpoint.transactionsInWindow).toLocaleString() + " · " +
+            Number(endpoint.rollbacksInWindow || 0).toLocaleString() + " rolled back";
+          var errors = endpoint.deadlocksInWindow == null || endpoint.conflictsInWindow == null ? "—" :
+            endpoint.deadlocksInWindow + " deadlocks · " + endpoint.conflictsInWindow + " conflicts";
+          var availability = endpoint.available == null ? "unknown" : (endpoint.available ? "available" : "unavailable");
+          return ['<span class="mono">' + esc(endpoint.workload) + "</span><br>" + esc(availability),
+            esc(endpoint.role), connections,
+            bytes(endpoint.sizeBytes) + " <span class=\"muted\">(" + byteChange(endpoint.growthBytes) + ")</span>",
+            transactions, errors,
+            endpoint.role === "replica" && endpoint.replicationLagSeconds != null
+              ? Number(endpoint.replicationLagSeconds).toFixed(2) + "s" : "—",
+            ago(endpoint.sampledAt) + '<br><span class="muted">since ' + ago(endpoint.observedFrom) + "</span>"];
+        })));
+  }
+
+  function renderStorageBrokerEvidence(d) {
+    if (!d) return unavailable("Storage broker", { source: "telemetry", error: "query unavailable" });
+    var broker = d.storageBroker;
+    if (!broker) {
+      return instrumentationGap("Storage", "No storage-broker metrics exist in this window.");
+    }
+    var reporting = broker.targetsScrapeable + "/" + broker.targetsCurrent +
+      " metrics endpoints reporting";
+    var reportingClass = broker.targetsCurrent > 0 &&
+      broker.targetsScrapeable === broker.targetsCurrent ? "p-ok" : "p-warn";
+    var count = function (value) {
+      return value == null ? "—" : Number(value).toLocaleString();
+    };
+    var latency = "—";
+    if (broker.successP95LatencySeconds != null) {
+      var latencyMs = Number(broker.successP95LatencySeconds) * 1000;
+      latency = (broker.successP95LatencyOverflow ? "> " : "") +
+        (latencyMs < 10 ? latencyMs.toFixed(1) : Math.round(latencyMs)) + " ms";
+    }
+    var status = '<span class="pill ' + reportingClass + '">' + esc(reporting) + "</span>";
+    if (broker.errorRequestsInWindow > 0) {
+      status += '<span class="pill p-bad">' + count(broker.errorRequestsInWindow) +
+        " broker errors</span>";
+    }
+    return panel("Storage broker", status + evidenceBadge(d),
+      table(["Requests", "Successful", "Rejected", "Broker errors", "Successful p95", "Sampled"], [[
+        count(broker.requestsInWindow), count(broker.successfulRequestsInWindow),
+        count(broker.rejectedRequestsInWindow), count(broker.errorRequestsInWindow),
+        latency, ago(broker.sampledAt),
+      ]]) + '<p class="note">Metrics endpoint reporting does not test request or S3 availability. ' +
+      'Counts cover safely comparable counters since ' + esc(ago(broker.observedFrom)) +
+      '; “—” means a counter reset made that value unsafe.</p>');
+  }
+
+  function renderIdentityEvidence(d) {
+    if (!d) return unavailable("Zitadel authentication", { source: "telemetry", error: "query unavailable" });
+    var identity = d.identity;
+    if (!identity) {
+      return instrumentationGap("Identity", "No Zitadel authentication metrics exist in this window.");
+    }
+    var reporting = identity.targetsScrapeable + "/" + identity.targetsCurrent +
+      " metrics endpoints reporting";
+    var reportingClass = identity.targetsCurrent > 0 &&
+      identity.targetsScrapeable === identity.targetsCurrent ? "p-ok" : "p-warn";
+    var count = function (value) {
+      return value == null ? "—" : Number(value).toLocaleString();
+    };
+    var latency = "—";
+    if (identity.requestP95LatencySeconds != null) {
+      var latencyMs = Number(identity.requestP95LatencySeconds) * 1000;
+      latency = (identity.requestP95LatencyOverflow ? "> " : "") +
+        (latencyMs < 10 ? latencyMs.toFixed(1) : Math.round(latencyMs)) + " ms";
+    }
+    var routes = identity.routes || [];
+    var serverErrors = routes.reduce(function (total, route) {
+      return total + Number(route.errorRequestsInWindow || 0);
+    }, 0);
+    var status = '<span class="pill ' + reportingClass + '">' + esc(reporting) + "</span>";
+    if (serverErrors > 0) {
+      status += '<span class="pill p-bad">' + count(serverErrors) + " server errors</span>";
+    }
+    return panel("Zitadel authentication", status + evidenceBadge(d),
+      table(["Route", "Requests", "Successful", "Rejected", "Server errors"], routes.map(function (route) {
+        return [esc(route.route), count(route.requestsInWindow), count(route.successfulRequestsInWindow),
+          count(route.rejectedRequestsInWindow), count(route.errorRequestsInWindow)];
+      })) + '<p class="note">All Zitadel HTTP: ' + count(identity.httpRequestsInWindow) +
+      " requests · p95 " + esc(latency) + ". Rejected responses are 4xx and can be expected caller or " +
+      "credential rejection; only 5xx responses are service errors. Metrics endpoint reporting does not prove " +
+      "authentication or database availability. Counts cover safely comparable counters since " +
+      esc(ago(identity.observedFrom)) + '; “—” means a counter reset made that value unsafe.</p>');
+  }
+
+  function latency(seconds) {
+    if (seconds === null || seconds === undefined) return "—";
+    var ms = Number(seconds) * 1000;
+    return (ms < 10 ? ms.toFixed(1) : Math.round(ms)) + " ms";
+  }
+
+  function sampleReasonLabel(reason) {
+    if (reason === "slow") return "slowest in interval";
+    if (reason === "healthy_sample") return "representative sample";
+    if (reason === "error_log") return "error log";
+    return reason;
+  }
+
+  function renderApplicationEvidence(d, namespace) {
+    if (!d) return unavailable("Application services", { source: "telemetry", error: "query unavailable" });
+    var services = (d.applications || []).filter(function (service) {
+      return service.namespace === namespace;
+    });
+    applicationEvidenceByNamespace[namespace] = services;
+    if (!services.length) {
+      return instrumentationGap("Application", "No service operation telemetry exists in this window.");
+    }
+    var hasLoss = services.some(function (service) { return service.complete === false; });
+    return panel("Services", '<span class="pill ' + (hasLoss ? "p-warn" : "p-mute") + '">' +
+      (hasLoss ? "Telemetry loss reported · totals may be partial" : "Complete operation totals · sampled executions") + "</span>",
+      table(["Service", "Coverage", "Executions", "Successful", "Rejected", "Failed", "p95", "Samples", "Last seen"],
+        services.map(function (service) {
+          var cls = service.failed ? "p-bad" : "p-ok";
+          return ['<button class="service-name" type="button" data-service-open data-namespace="' +
+            esc(namespace) + '" data-service="' + esc(service.service) + '">' + esc(service.service) + "</button>",
+            '<span class="pill ' + (service.complete === false ? "p-warn" : "p-ok") + '">' +
+            (service.complete === false ? "partial" : "complete") + "</span>" +
+            (service.detailsTruncated ? ' <span class="pill p-mute">details limited</span>' : ""),
+            Number(service.executions).toLocaleString(), Number(service.successful).toLocaleString(),
+            Number(service.rejected).toLocaleString(), '<span class="pill ' + cls + '">' +
+            Number(service.failed).toLocaleString() + "</span>", latency(service.p95DurationSeconds),
+            (service.samples || []).length, ago(service.lastSeen)];
+        })) + '<p class="note">Counts include every reported execution. Open a service for operations and retained trace + log examples.</p>');
+  }
+
+  function openServiceDetail(namespace, name, selectedOperation) {
+    var service = (applicationEvidenceByNamespace[namespace] || []).find(function (item) {
+      return item.service === name;
+    });
+    if (!service) return;
+    var dialog = document.getElementById("service-detail");
+    dialog.dataset.namespace = namespace;
+    dialog.dataset.service = name;
+    document.getElementById("service-detail-title").textContent = name;
+    document.getElementById("service-detail-summary").innerHTML = '<div class="detail-meta"><span class="pill p-mute">' +
+      Number(service.executions).toLocaleString() + ' executions</span><span class="pill ' +
+      (service.failed ? "p-bad" : "p-ok") + '">' + Number(service.failed).toLocaleString() + " failed</span></div>";
+    var operations = service.operations || [];
+    var body = '<div class="dialog-section"><h3>Operations</h3>' +
+      table(["Operation", "Kind", "Runs", "Successful", "Rejected", "Failed", "p95", "Samples"],
+        operations.map(function (operation) {
+          return ['<button class="service-name" type="button" data-operation-open data-operation="' +
+            esc(operation.operation) + '"><span class="mono">' + esc(operation.operation) + "</span></button>", esc(operation.kind),
+            Number(operation.executions).toLocaleString(), Number(operation.successful).toLocaleString(),
+            Number(operation.rejected).toLocaleString(), Number(operation.failed).toLocaleString(),
+            latency(operation.p95DurationSeconds), Number(operation.sampledExecutions).toLocaleString()];
+        })) + "</div>";
+    var samples = selectedOperation ? (service.samples || []).filter(function (sample) {
+      return sample.operation === selectedOperation;
+    }) : [];
+    body += '<div class="dialog-section"><h3>Recent execution samples' +
+      (selectedOperation ? " · " + esc(selectedOperation) : "") + "</h3>" + (samples.length
+      ? '<div class="sample-list">' + samples.map(function (sample) {
+          var logs = sample.logs || [];
+          return '<div class="sample"><div class="sample-head"><span class="pill ' +
+            (sample.outcome === "success" ? "p-ok" : (sample.outcome === "rejected" ? "p-warn" : "p-bad")) + '">' +
+            esc(sample.outcome) + '</span><span class="mono">' + esc(sample.operation) + '</span><span class="muted">' +
+            ago(sample.startedAt) + " · " + latency(sample.durationSeconds) + " · kept: " +
+            esc(sampleReasonLabel(sample.reason)) +
+            '</span>' + (sample.complete ? "" : '<span class="pill p-warn">partial bundle</span>') +
+            '</div><div class="muted mono">trace ' + esc(sample.traceId) + "</div>" +
+            table(["Span", "Service", "Status", "Dependency", "Started", "Duration"], (sample.spans || []).map(function (span) {
+              return ['<span class="mono">' + esc(span.name) + "</span>", esc(span.service),
+                '<span class="pill ' + (span.status === "error" ? "p-bad" : "p-ok") + '">' + esc(span.status) + "</span>",
+                esc(span.serverAddress || "—") + (span.errorType ? " · " + esc(span.errorType) : ""),
+                ago(span.startedAt), latency(span.durationSeconds)];
+            })) +
+            (logs.length ? logs.map(function (log) {
+              return '<div class="sample-log"><span class="pill p-bad">' + esc(log.severity) + "</span> " +
+                esc(log.message) + ' <span class="muted">' + ago(log.timestamp) + "</span></div>";
+            }).join("") : '<div class="note">No retained log on this execution.</div>') + "</div>";
+        }).join("") + "</div>"
+      : '<div class="empty">' + (selectedOperation
+        ? "No execution sample was retained for this operation in this window."
+        : "Choose an operation to inspect its retained trace and logs.") + "</div>") + "</div>";
+    var standaloneLogs = service.standaloneLogs || [];
+    body += '<div class="dialog-section"><h3>Standalone error logs</h3>' + (standaloneLogs.length
+      ? standaloneLogs.map(function (log) {
+          return '<div class="sample-log"><span class="pill p-bad">' + esc(log.severity) + "</span> " +
+            esc(log.message) + ' <span class="muted">' + ago(log.timestamp) + "</span></div>";
+        }).join("")
+      : '<div class="empty">No uncorrelated ERROR or FATAL logs in this window.</div>') + "</div>";
+    document.getElementById("service-detail-body").innerHTML = body;
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function evidenceSlot(id) {
+    return '<div id="' + esc(id) + '"><div class="empty">Loading recent evidence&hellip;</div></div>';
+  }
+
+  var renderEpoch = 0;
+
+  // Live sources render first. The bounded Parquet query can take tens of
+  // seconds, so it fills the owning layer afterwards and never holds the live
+  // Kubernetes view behind a loading screen.
+  function hydrateEvidence(epoch) {
+    var nodeSlot = document.getElementById("evidence-nodes");
+    var databaseSlot = document.getElementById("evidence-database");
+    var storageBrokerSlot = document.getElementById("evidence-storage-broker");
+    var identitySlot = document.getElementById("evidence-identity");
+    var applicationSlots = owners({}).map(function (p) {
+      return { namespace: p, element: document.getElementById("application-view-" + p) };
+    }).filter(function (slot) { return slot.element; });
+    var workloadSlots = owners({ infra: true }).map(function (p) {
+      return { namespace: p, element: document.getElementById("workload-view-" + p) };
+    }).filter(function (slot) { return slot.element; });
+    if (!nodeSlot && !databaseSlot && !storageBrokerSlot && !identitySlot && !workloadSlots.length && !applicationSlots.length) return;
+
+    recentEvidence().then(function (d) {
+      if (epoch !== renderEpoch) return;
+      if (nodeSlot) nodeSlot.innerHTML = renderNodeEvidence(d);
+      if (databaseSlot) databaseSlot.innerHTML = renderDatabaseEvidence(d);
+      if (storageBrokerSlot) storageBrokerSlot.innerHTML = renderStorageBrokerEvidence(d);
+      if (identitySlot) identitySlot.innerHTML = renderIdentityEvidence(d);
+      applicationSlots.forEach(function (slot) {
+        slot.element.innerHTML = renderApplicationEvidence(d, slot.namespace);
+      });
+      workloadSlots.forEach(function (slot) {
+        workloadEvidenceByNamespace[slot.namespace] = d;
+        slot.element.innerHTML = renderWorkloadTable(slot.namespace);
+        var dialog = document.getElementById("workload-detail");
+        if (dialog.open && dialog.dataset.namespace === slot.namespace) {
+          workloadDialogOpener = Array.from(slot.element.querySelectorAll("button[data-workload-open]")).find(function (button) {
+            return button.dataset.workload === dialog.dataset.workload;
+          }) || null;
+          openWorkloadDetail(slot.namespace, dialog.dataset.workload);
+        }
+      });
+    }).catch(function () {
+      if (epoch !== renderEpoch) return;
+      if (nodeSlot) nodeSlot.innerHTML = renderNodeEvidence(null);
+      if (databaseSlot) databaseSlot.innerHTML = renderDatabaseEvidence(null);
+      if (storageBrokerSlot) storageBrokerSlot.innerHTML = renderStorageBrokerEvidence(null);
+      if (identitySlot) identitySlot.innerHTML = renderIdentityEvidence(null);
+      applicationSlots.forEach(function (slot) {
+        slot.element.innerHTML = renderApplicationEvidence(null, slot.namespace);
+      });
+      workloadSlots.forEach(function (slot) {
+        workloadEvidenceByNamespace[slot.namespace] = null;
+        slot.element.innerHTML = renderWorkloadTable(slot.namespace);
+        var dialog = document.getElementById("workload-detail");
+        if (dialog.open && dialog.dataset.namespace === slot.namespace) {
+          workloadDialogOpener = Array.from(slot.element.querySelectorAll("button[data-workload-open]")).find(function (button) {
+            return button.dataset.workload === dialog.dataset.workload;
+          }) || null;
+          openWorkloadDetail(slot.namespace, dialog.dataset.workload);
+        }
+      });
+    });
+  }
+
+  // ----------------------------------------------------------------- views
+
+  var views = {};
+
+  views.clusterOverview = function () {
+    return get("/platform").then(function (d) {
+      var html = "<h1>Cluster</h1><p class='sub'>platform overview</p>";
+
+      var cap = d.capacity, nodes = d.nodes;
+      html += '<div class="grid g3">';
+      html += usable(nodes)
+        ? card("Nodes", '<div class="stat">' + nodes.data.length +
+            ' <small>' + nodes.data.filter(function (n) { return n.ready; }).length + " ready</small></div>")
+        : unavailable("Nodes", nodes);
+      if (usable(cap)) {
+        var c = pct(cap.data.cpuRequestedRatio), m = pct(cap.data.memoryRequestedRatio);
+        html += card("CPU requested", '<div class="stat">' + c + '<small>%</small></div>' + meter(c) +
+          '<div class="note">' + esc(cap.data.source || "") + "</div>");
+        html += card("Memory requested", '<div class="stat">' + m + '<small>%</small></div>' + meter(m));
+      } else {
+        html += unavailable("Capacity", cap);
+      }
+      html += "</div>";
+
+      if (usable(d.projects)) {
+        html += panel("Projects", "", table(["Project", "Health", "Pods", "Schema"],
+          d.projects.data.map(function (p) {
+            return [esc(p.name), healthPill(p.health),
+              (p.podsReady === undefined ? "—" : p.podsReady + "/" + p.podsDesired),
+              '<span class="mono muted">' + esc(p.schema || "—") + "</span>"];
+          })));
+      } else {
+        html += unavailable("Projects", d.projects);
+      }
+
+      if (usable(d.backups)) {
+        var b = d.backups.data;
+        html += panel("Backups", staleBadge(d.backups),
+          '<div style="padding:.85rem .9rem"><div class="kv">' +
+          '<div><span class="k">Last successful</span><span class="v">' + ago(b.lastSuccessAt) + "</span></div>" +
+          '<div><span class="k">Schedule</span><span class="v">' + esc(b.schedule || "—") + "</span></div>" +
+          '<div><span class="k">Restore verified</span><span class="v">' +
+          (b.restoreVerifiedAt ? ago(b.restoreVerifiedAt) : "never") + "</span></div>" +
+          "</div></div>");
+      } else {
+        html += unavailable("Backups", d.backups);
+      }
+      return html;
+    });
+  };
+
+  views.nodes = function () {
+    return get("/platform/nodes").then(function (d) {
+      return "<h1>Nodes</h1><p class='sub'>" + d.nodes.length + " nodes</p>" +
+        panel("Workers", "", table(["Node", "Status", "CPU", "Memory", "Pods", "Version"],
+          d.nodes.map(function (n) {
+            return [
+              '<span class="mono">' + esc(n.name) + "</span>",
+              n.ready ? '<span class="pill p-ok">ready</span>' : '<span class="pill p-bad">not ready</span>',
+              n.cpuUsedRatio === undefined ? "—" : pct(n.cpuUsedRatio) + "%",
+              n.memoryUsedRatio === undefined ? "—" : pct(n.memoryUsedRatio) + "%",
+              n.pods === undefined ? "—" : n.pods,
+              '<span class="mono muted">' + esc(n.kubeletVersion) + "</span>",
+            ];
+          }))) + evidenceSlot("evidence-nodes");
+    });
+  };
+
+  views.projectOverview = function (p) {
+    return get("/projects/" + encodeURIComponent(p)).then(function (d) {
+      var html = band(p, "namespace " + d.namespace + (d.image ? " \u00b7 " + d.image : ""));
+
+      html += '<div class="grid g3">';
+      if (usable(d.workloads)) {
+        var ready = 0, total = 0;
+        d.workloads.data.forEach(function (w) { ready += w.ready; total += (w.replicas || 0); });
+        html += card("Pods", '<div class="stat">' + ready + "/" + total + "</div>");
+      } else {
+        html += unavailable("Workloads", d.workloads);
+      }
+      if (usable(d.quota)) {
+        var c = pct(d.quota.data.cpuUsedRatio), m = pct(d.quota.data.memoryUsedRatio);
+        html += card("CPU of quota", c === null ? '<div class="stat">—</div>' :
+          '<div class="stat">' + c + '<small>%</small></div>' + meter(c));
+        html += card("Memory of quota", m === null ? '<div class="stat">—</div>' :
+          '<div class="stat">' + m + '<small>%</small></div>' + meter(m));
+      } else {
+        html += unavailable("Quota", d.quota);
+      }
+      html += "</div><div class='grid g2'>";
+
+      html += usable(d.database)
+        ? card("Database", '<div class="kv">' +
+            '<div><span class="k">Schema</span><span class="v">' + esc(d.database.data.schema) + "</span></div>" +
+            '<div><span class="k">Size</span><span class="v">' + bytes(d.database.data.sizeBytes) + "</span></div>" +
+            '<div><span class="k">Tables</span><span class="v">' + d.database.data.tableCount + "</span></div></div>")
+        : unavailable("Database", d.database);
+
+      html += usable(d.storage)
+        ? card("Storage", '<div class="kv">' +
+            '<div><span class="k">Bucket</span><span class="v">' + esc(d.storage.data.bucket) + "</span></div>" +
+            '<div><span class="k">Objects</span><span class="v">' + d.storage.data.objectCount + "</span></div>" +
+            '<div><span class="k">Size</span><span class="v">' + bytes(d.storage.data.bytesUsed) + "</span></div></div>")
+        : unavailable("Storage", d.storage);
+
+      html += usable(d.auth)
+        ? card("Auth", '<div class="kv">' +
+            '<div><span class="k">Zitadel org</span><span class="v">' + esc(d.auth.data.org) + "</span></div>" +
+            '<div><span class="k">Applications</span><span class="v">' + d.auth.data.applications.length + "</span></div>" +
+            '<div><span class="k">Users</span><span class="v">' + (d.auth.data.userCount ?? "—") + "</span></div></div>")
+        : unavailable("Auth", d.auth);
+
+      html += usable(d.domains)
+        ? card("Domains", '<div class="kv">' + d.domains.data.slice(0, 4).map(function (h) {
+            return '<div><span class="k">' + esc(h.host) + '</span><span class="v">' + esc(h.tlsSource) + "</span></div>";
+          }).join("") + (d.domains.data.length ? "" : '<div class="note">No hostnames.</div>') + "</div>")
+        : unavailable("Domains", d.domains);
+
+      return html + "</div>";
+    });
+  };
+
+  // A release is a Helm revision. The Kubernetes objects it installs are
+  // workloads, and they live on their own page — the two used to share a name
+  // and that was the confusion.
+  views.releases = function (p) {
+    return get("/projects/" + encodeURIComponent(p) + "/releases").then(function (d) {
+      var rows = d.releases;
+      return band(p, "helm revisions") +
+        panel("History", '<span class="pill p-mute">' +
+          (rows.some(function (x) { return x.source === "helm+github"; }) ? "helm + github" : "helm") +
+          "</span>",
+          table(["Rev", "Status", "Commit", "By", "When", "Duration"],
+            rows.map(function (x) {
+              var cls = { deployed: "p-ok", failed: "p-bad", progressing: "p-warn", pending: "p-warn" }[x.status] || "p-mute";
+              return [x.revision,
+                '<span class="pill ' + cls + '">' + esc(x.status) + "</span>",
+                '<span class="mono">' + esc(x.commit ? x.commit.slice(0, 7) : "—") + "</span>",
+                esc(x.actor || "—"),
+                ago(x.updatedAt),
+                x.durationSeconds === undefined ? "—" : Math.floor(x.durationSeconds / 60) + "m " + (x.durationSeconds % 60) + "s"];
+            }))) +
+        '<p class="note">Commit, author and duration join in from GitHub Actions via the image tag.</p>';
+    });
+  };
+
+  // One row per controller joins current Kubernetes state to the latest
+  // retained sample. Pods and warnings stay attached to that controller in a
+  // detail dialog instead of becoming two more page-level tables.
+  views.workloads = function (p) {
+    return get("/projects/" + encodeURIComponent(p) + "/workloads").then(function (d) {
+      var ws = d.workloads || [];
+      var ready = 0, want = 0;
+      ws.forEach(function (w) { ready += w.ready; want += (w.replicas === undefined ? w.ready : w.replicas); });
+      workloadDataByNamespace[p] = ws;
+
+      var html = band(p, ws.length + " controllers \u00b7 " + ready + "/" + want + " pods ready");
+      if (!ws.length) return html + '<div class="empty">No workloads in this namespace.</div>';
+      return html + '<div id="workload-view-' + esc(p) + '">' + renderWorkloadTable(p) + "</div>";
+    });
+  };
+
+  views.services = function (p) {
+    return Promise.resolve(
+      band(p, "instrumented application services") +
+      '<div id="application-view-' + esc(p) + '"><div class="empty">Loading recent evidence&hellip;</div></div>'
+    );
+  };
+
+  views.database = function (p) {
+    return Promise.all([
+      get("/projects/" + encodeURIComponent(p) + "/database"),
+      get("/projects/" + encodeURIComponent(p) + "/database/tables"),
+      get("/projects/" + encodeURIComponent(p) + "/database/activity")
+        .then(function (data) { return { data: data }; })
+        .catch(function (error) { return { error: error }; }),
+    ]).then(function (r) {
+      var summary = r[0], tables = r[1], activity = r[2];
+      var tableRows = (tables.tables || []).slice()
+        .sort(function (a, b) { return b.sizeBytes - a.sizeBytes; });
+      var html = band(p, "schema " + summary.schema + " \u00b7 read-only");
+      html += '<div class="grid g3">' +
+        card("Schema size", '<div class="stat">' + bytes(summary.sizeBytes) + "</div>") +
+        card("Connections", '<div class="stat">' + (summary.connections ?? "—") + "</div>") +
+        card("Tables", '<div class="stat">' + summary.tableCount + "</div>") + "</div>";
+      if (activity.data) {
+        var a = activity.data;
+        html += panel("Current activity", '<span class="pill p-mute">live</span>',
+          table(["Connections", "Active", "Idle in transaction", "Waiting for locks", "Longest running"], [[
+            a.connections, a.active, a.idleInTransaction, a.waitingLocks,
+            a.longestRunningMs == null ? "—" : Math.round(a.longestRunningMs / 1000) + "s",
+          ]]));
+      } else {
+        html += unavailable("Current activity", {
+          source: "PostgreSQL", error: activity.error && activity.error.message,
+        });
+      }
+      html += panel("Tables", '<span class="pill p-mute">' + tableRows.length + "</span>",
+        table(["Table", "Estimated rows", "Total size", "Indexes"],
+          tableRows.map(function (t) {
+            return [esc(t.name), Number(t.rowsEstimate).toLocaleString(), bytes(t.sizeBytes), t.indexCount ?? "—"];
+          })));
+      html += '<p class="note">Largest tables first. Row counts are PostgreSQL estimates; total size includes table data and indexes.</p>';
+      return html;
+    });
+  };
+
+  views.storage = function (p) {
+    return Promise.all([
+      get("/projects/" + encodeURIComponent(p) + "/storage"),
+      get("/projects/" + encodeURIComponent(p) + "/storage/policy").catch(function () { return null; }),
+    ]).then(function (r) {
+      var s = r[0], policy = r[1];
+      var html = band(p, "bucket " + s.bucket) + "<div class='grid g3'>" +
+        card("Objects", '<div class="stat">' + Number(s.objectCount).toLocaleString() + "</div>") +
+        card("Size", '<div class="stat">' + bytes(s.bytesUsed) + "</div>") +
+        card("Endpoint", '<div class="note mono">' + esc(s.endpoint || "—") + "</div>") + "</div>";
+      if (policy) {
+        html += panel("Broker policy", '<span class="pill p-mute">tofu-owned</span>',
+          table(["Prefix", "Operations", "TTL", "Identity"],
+            policy.grants.map(function (g) {
+              return ['<span class="mono">' + esc(g.prefix) + "</span>",
+                esc(g.operations.join(", ")), g.ttlSeconds + "s",
+                g.requiresUser ? "zitadel user" : "app only"];
+            })));
+      }
+      return html;
+    });
+  };
+
+  views.auth = function (p) {
+    return get("/projects/" + encodeURIComponent(p) + "/auth").then(function (d) {
+      return band(p, "zitadel org " + d.org) +
+        '<div class="grid g3">' +
+        card("Users", '<div class="stat">' + (d.userCount ?? "—") + "</div>") +
+        card("Applications", '<div class="stat">' + d.applications.length + "</div>") +
+        card("Console", '<div class="note"><a href="' + esc(d.consoleUrl) +
+          '" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">Open in Zitadel &rarr;</a></div>') +
+        "</div>" +
+        panel("Applications", "", table(["Application", "Type", "Client ID"],
+          d.applications.map(function (a) {
+            return [esc(a.name), esc(a.type), '<span class="mono muted">' + esc(a.clientId || "—") + "</span>"];
+          })));
+    });
+  };
+
+  views.domains = function (p) {
+    return get("/projects/" + encodeURIComponent(p) + "/domains").then(function (d) {
+      return band(p, d.hostnames.length + " hostnames") +
+        panel("Hostnames", "", table(["Hostname", "Record", "Routes to", "TLS"],
+          d.hostnames.map(function (h) {
+            return [esc(h.host), esc(h.recordType), esc(h.routesTo || "—"),
+              '<span class="pill p-mute">' + esc(h.tlsSource) + "</span>"];
+          })));
+    });
+  };
+
+  // ---------------------------------------------------------------- render
+
+  function current() {
+    for (var i = 0; i < NAV.length; i++) if (NAV[i].id === state.section) return NAV[i];
+    return NAV[1];
+  }
+
+  // Tenant-scoped views render once per tenant. "*" means every tenant, which
+  // is the whole point of a filter rather than a switcher: the default answers
+  // "across the platform", and narrowing is a choice.
+  var INFRA = "infra";
+
+  // Owners, not tenants. infra owns the shared services — Zitadel, PostgreSQL,
+  // ingress-nginx, the broker, this console — and those are workloads like any
+  // other, so infra belongs in the Workloads list. It is not a tenant: it has
+  // no schema, bucket or Zitadel org, so it stays out of the tenant-only views.
+  function owners(item) {
+    var all = state.projects.map(function (x) { return x.name; });
+    if (item && item.infra) all = [INFRA].concat(all);
+    return state.tenant === "*" ? all : all.filter(function (n) { return n === state.tenant; });
+  }
+
+  function band(p, sub) {
+    return '<h2 class="band">' + esc(p) +
+      (sub ? ' <span class="bandsub">' + esc(sub) + "</span>" : "") + "</h2>";
+  }
+
+  // One tenant failing must not blank the page for the others — same reasoning
+  // as the section envelope on the server.
+  function perTenant(fn, item) {
+    var names = owners(item);
+    if (!names.length) return Promise.resolve('<div class="empty">No tenants.</div>');
+    return Promise.all(names.map(function (n) {
+      return fn(n).catch(function (err) { return band(n) + problem(err, n); });
+    })).then(function (parts) { return parts.join(""); });
+  }
+
+  function problem(err, label) {
+    if (err instanceof NotConfigured) {
+      return '<div class="unavailable"><span class="label">' + esc(label) +
+        " &mdash; not configured</span>" +
+        '<span class="why">No credential is set for ' + esc(err.source) +
+        ", so this panel has nothing to read. See docs/runbooks/infra-console-credentials.md.</span></div>";
+    }
+    if ((err.message || "") === "identity inventory unavailable") {
+      return '<div class="unavailable"><span class="label">Identity inventory unavailable</span>' +
+        '<span class="why">The dashboard account cannot list organizations, users, or applications. ' +
+        "Authentication metrics above still work.</span></div>";
+    }
+    return '<div class="error">' + esc(err.message || String(err)) + "</div>";
+  }
+
+  function renderNav() {
+    var nav = document.getElementById("nav");
+    nav.innerHTML = NAV.map(function (i) {
+      if (i.grp) return '<div class="navgrp">' + esc(i.grp) + "</div>";
+      return '<button data-section="' + i.id + '"' +
+        (i.id === state.section ? ' aria-current="page"' : "") + ">" + esc(i.name) + "</button>";
+    }).join("");
+  }
+
+  function view() {
+    var item = current();
+    var fn = views[item.view];
+    if (!item.tenant) return fn();
+    return perTenant(fn, item).then(function (html) {
+      var layerCoverage = item.view === "database"
+        ? evidenceSlot("evidence-database") + instrumentationPartial("Database",
+          "Query-group latency, blocking history, and PostgreSQL error logs are not collected yet.")
+        : (item.view === "storage"
+          ? evidenceSlot("evidence-storage-broker") + instrumentationPartial("Storage",
+            "Bucket growth history is not collected yet.")
+          : (item.view === "auth"
+            ? evidenceSlot("evidence-identity") + instrumentationPartial("Identity",
+              "Selected safe error logs and traces are not collected yet.")
+            : ""));
+      return "<h1>" + esc(item.title || item.name) + "</h1>" + layerCoverage + html;
+    });
+  }
+
+  function render() {
+    var main = document.getElementById("main");
+    var status = document.getElementById("status");
+    var epoch = ++renderEpoch;
+    renderNav();
+    main.innerHTML = '<div class="empty">Loading&hellip;</div>';
+    status.textContent = "loading";
+
+    document.getElementById("tenantbox").hidden = !(current().tenant || current().filter);
+    // infra owns workloads but is not a tenant, so it is only selectable on the
+    // views it actually participates in. Offering it on Database would resolve
+    // to an empty owner list and render a dead "no tenants".
+    var infraOpt = document.querySelector('#tenant option[value="' + INFRA + '"]');
+    if (infraOpt) {
+      infraOpt.hidden = !current().infra;
+      if (!current().infra && state.tenant === INFRA) state.tenant = "*";
+      document.getElementById("tenant").value = state.tenant;
+    }
+
+    view().then(function (html) {
+      if (epoch !== renderEpoch) return;
+      main.innerHTML = html;
+      status.textContent = new Date().toLocaleTimeString();
+      hydrateEvidence(epoch);
+    }).catch(function (err) {
+      if (epoch !== renderEpoch) return;
+      main.innerHTML = problem(err, state.section);
+      status.textContent = err instanceof NotConfigured ? "not configured" : "error";
+    });
+  }
+
+  // ------------------------------------------------------------------ wire
+
+  document.getElementById("nav").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-section]");
+    if (!b) return;
+    state.section = b.dataset.section;
+    render();
+  });
+
+  document.getElementById("main").addEventListener("click", function (e) {
+    var filter = e.target.closest("button[data-workload-filter]");
+    if (filter) {
+      workloadFilterByNamespace[filter.dataset.namespace] = filter.dataset.workloadFilter;
+      var target = document.getElementById("workload-view-" + filter.dataset.namespace);
+      if (target) target.innerHTML = renderWorkloadTable(filter.dataset.namespace);
+    }
+
+    var workload = e.target.closest("button[data-workload-open]");
+    if (workload) {
+      workloadDialogOpener = workload;
+      openWorkloadDetail(workload.dataset.namespace, workload.dataset.workload);
+    }
+
+    var service = e.target.closest("button[data-service-open]");
+    if (service) {
+      serviceDialogOpener = service;
+      openServiceDetail(service.dataset.namespace, service.dataset.service);
+    }
+  });
+
+  document.querySelector("#workload-detail .dialog-close").addEventListener("click", function () {
+    document.getElementById("workload-detail").close();
+  });
+  document.getElementById("workload-detail").addEventListener("keydown", function (e) {
+    if (e.key === "Escape") this.close();
+  });
+  document.getElementById("workload-detail").addEventListener("close", function () {
+    if (workloadDialogOpener && workloadDialogOpener.isConnected) workloadDialogOpener.focus();
+  });
+  document.querySelector("#service-detail .dialog-close").addEventListener("click", function () {
+    document.getElementById("service-detail").close();
+  });
+  document.getElementById("service-detail").addEventListener("keydown", function (e) {
+    if (e.key === "Escape") this.close();
+  });
+  document.getElementById("service-detail").addEventListener("click", function (e) {
+    var operation = e.target.closest("button[data-operation-open]");
+    if (operation) openServiceDetail(this.dataset.namespace, this.dataset.service, operation.dataset.operation);
+  });
+  document.getElementById("service-detail").addEventListener("close", function () {
+    if (serviceDialogOpener && serviceDialogOpener.isConnected) serviceDialogOpener.focus();
+  });
+
+  document.getElementById("tenant").addEventListener("change", function (e) {
+    state.tenant = e.target.value;
+    render();
+  });
+
+  get("/projects").then(function (d) {
+    state.projects = d.projects || [];
+    document.getElementById("tenant").innerHTML =
+      '<option value="*">All owners</option>' +
+      '<option value="' + INFRA + '">' + INFRA + " (platform)</option>" +
+      state.projects.map(function (x) {
+        return '<option value="' + esc(x.name) + '">' + esc(x.name) + "</option>";
+      }).join("");
+    render();
+  }).catch(function (err) {
+    document.getElementById("main").innerHTML =
+      '<div class="error">' + esc(err.message || String(err)) + "</div>";
+  });
+})();
+</script>
+</body>
+</html>

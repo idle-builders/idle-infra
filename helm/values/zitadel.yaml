@@ -1,0 +1,132 @@
+# Zitadel Helm values
+# Chart: https://charts.zitadel.com
+# Version: 10.0.4
+#
+# Shared identity provider (OIDC/OAuth2) for multi-tenant platform.
+# Deployed into the infra namespace alongside PostgreSQL.
+
+replicaCount: 2
+nodeSelector: {}
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: zitadel
+        topologyKey: kubernetes.io/hostname
+
+login:
+  replicaCount: 2
+  nodeSelector: {}
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: zitadel-login
+          topologyKey: kubernetes.io/hostname
+  pdb:
+    enabled: true
+    minAvailable: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# Zitadel container resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+# Disable bundled PostgreSQL and CockroachDB — using shared platform PostgreSQL
+postgresql:
+  enabled: false
+cockroachdb:
+  enabled: false
+
+# Zitadel configuration
+zitadel:
+  # The masterkey is used to AES-encrypt sensitive data at rest.
+  # Referenced from an existing K8s secret (created by Terraform).
+  masterkeySecretName: zitadel-masterkey
+
+  # Runtime configuration (written to ConfigMap)
+  configmapConfig:
+    ExternalDomain: # Set via Terraform helm_release set{} block
+    ExternalPort: 443
+    ExternalSecure: true
+    TLS:
+      Enabled: false # TLS terminated at ingress-nginx, not at Zitadel
+
+    Database:
+      Postgres:
+        Host: postgresql-primary.infra.svc.cluster.local
+        Port: 5432
+        Database: zitadel
+        MaxOpenConns: 20
+        MaxIdleConns: 10
+        MaxConnLifetime: 30m
+        MaxConnIdleTime: 5m
+        User:
+          Username: zitadel
+          SSL:
+            Mode: verify-ca
+            RootCert: /etc/zitadel/pg-ca/ca.crt
+        Admin:
+          Username: zitadel_admin
+          SSL:
+            Mode: verify-ca
+            RootCert: /etc/zitadel/pg-ca/ca.crt
+
+  # Sensitive configuration (written to Secret, merged with configmapConfig at startup)
+  # DB password is injected via set_sensitive in the Terraform helm_release resource.
+  secretConfig:
+    Database:
+      Postgres:
+        User:
+          Password: # Injected via Terraform set_sensitive{} block
+        Admin:
+          Password: # Injected via Terraform set_sensitive{} block
+
+  # CA cert mounted via extraVolumes/extraVolumeMounts below
+  dbSslCaCrtSecret: ""
+
+# Init job runs database migrations on install/upgrade
+setupJob:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Service configuration — ClusterIP on Zitadel's default port
+service:
+  type: ClusterIP
+  port: 8080
+
+extraVolumes:
+  - name: pg-ca-cert
+    secret:
+      secretName: postgresql-crt
+      items:
+        - key: ca.crt
+          path: ca.crt
+
+extraVolumeMounts:
+  - name: pg-ca-cert
+    mountPath: /etc/zitadel/pg-ca
+    readOnly: true
+
+# Ingress handled by Terraform-managed kubernetes_ingress_v1 resource,
+# not the chart's built-in ingress, for consistency with the platform pattern.
+ingress:
+  enabled: false

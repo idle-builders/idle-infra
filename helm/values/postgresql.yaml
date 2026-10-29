@@ -1,0 +1,161 @@
+# Bitnami PostgreSQL Helm values
+# Chart: https://charts.bitnami.com/bitnami
+# Version: 18.7.0
+#
+# Self-hosted PostgreSQL in the infra namespace.
+# Infomaniak's DBaaS only supports MySQL — PostgreSQL is self-hosted because
+# applications uses pgTable() in Drizzle (PostgreSQL-specific).
+
+architecture: replication
+
+# Chart 18.x reads these keys at the top level. Keep pg_stat_statements loaded so
+# the extension created below is usable after every restart.
+postgresqlSharedPreloadLibraries: "pgaudit,pg_stat_statements"
+
+auth:
+  # postgresPassword is set via Terraform helm_release set{} block (not here)
+  # to avoid storing the password in version control.
+  database: postgres
+
+primary:
+  nodeSelector: {}
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: postgresql
+              app.kubernetes.io/name: postgresql
+          topologyKey: kubernetes.io/hostname
+
+  # Infra owns the explicit PostgreSQL ingress and egress boundaries. The chart
+  # defaults otherwise add allow-from-anywhere ingress and unrestricted egress.
+  networkPolicy:
+    allowExternal: false
+    allowExternalEgress: false
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    # Infomaniak Cinder CSI StorageClass for persistent volumes.
+    # Uses SSD-backed Cinder volumes.
+    storageClass: "csi-cinder-sc-retain"
+
+  # 1 CPU was pinned at ~980m under ingestion load (2026-10-01); 2 CPUs leaves headroom on 4-core nodes.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 3Gi
+
+  # Leave enough time for pg_basebackup when a replica is rebuilt. Without this,
+  # the liveness probe kills the initial copy and leaves an unusable partial PGDATA.
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 60
+
+  pgHbaConfiguration: |
+    local   all             all                                     scram-sha-256
+    # Non-SSL on loopback is intentional: kubectl port-forward provides its
+    # own TLS tunnel between the client and the cluster, so an additional
+    # in-pod TLS layer on 127.0.0.1 would be redundant. All remote connections
+    # still require SSL via the hostssl rules below.
+    host    all             all             127.0.0.1/32            scram-sha-256
+    hostssl replication     repl_user       0.0.0.0/0               scram-sha-256
+    hostssl replication     repl_user       ::/0                    scram-sha-256
+    hostssl all             all             0.0.0.0/0               scram-sha-256
+    hostssl all             all             ::/0                    scram-sha-256
+
+  # Append tuning to the chart-generated configuration. Using `configuration`
+  # here replaces Bitnami's listen/TLS settings and makes the pod loopback-only.
+  configuration: ""
+  extendedConfiguration: |
+    password_encryption = scram-sha-256
+    shared_buffers = 256MB
+    effective_cache_size = 1GB
+    work_mem = 4MB
+    maintenance_work_mem = 64MB
+    autovacuum_work_mem = 64MB
+    # 75 ran out after a restart (2026-10-01): every client pool reconnected at full size and
+    # Zitadel/example tenant/broker filled all non-superuser slots. Idle connections cost a few MB each.
+    max_connections = 150
+    statement_timeout = 5min
+    idle_in_transaction_session_timeout = 60s
+    wal_keep_size = 512MB
+    max_wal_size = 1GB
+    min_wal_size = 128MB
+    log_connections = on
+    log_disconnections = on
+    log_statement = 'ddl'
+    log_min_duration_statement = 1000
+    log_checkpoints = on
+
+  # Enable connection pooling via pg_stat_statements (lightweight, no extra deps)
+  initdbScripts:
+    init.sql: |
+      CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+      -- Prevent tenant roles from reading query text from other tenants.
+      -- Superusers retain access; application roles must not be granted it.
+      REVOKE ALL ON pg_stat_statements FROM PUBLIC;
+      REVOKE EXECUTE ON FUNCTION pg_stat_statements_reset() FROM PUBLIC;
+
+readReplicas:
+  nodeSelector: {}
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: postgresql
+              app.kubernetes.io/name: postgresql
+          topologyKey: kubernetes.io/hostname
+
+  networkPolicy:
+    allowExternal: false
+    allowExternalEgress: false
+
+  replicaCount: 1
+  # A hot standby needs max_connections >= the primary's, or it pauses replay.
+  extendedConfiguration: |
+    max_connections = 150
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: "csi-cinder-sc-retain"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 3Gi
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 60
+
+# Service configuration — ClusterIP only (internal cluster access)
+service:
+  type: ClusterIP
+  port: 5432
+
+tls:
+  enabled: true
+  autoGenerated: true
+
+# Export PostgreSQL health and replication metrics. The service carries standard
+# scrape annotations, so this works with Prometheus without another chart change.
+metrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

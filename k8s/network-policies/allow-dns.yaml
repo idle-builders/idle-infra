@@ -1,0 +1,32 @@
+# =============================================================================
+# k8s/network-policies/allow-dns.yaml
+# =============================================================================
+#
+# Reference template: allow DNS resolution via kube-system (UDP/TCP port 53).
+# Without this policy, pods cannot resolve any hostnames — including cluster
+# DNS for service discovery.
+#
+# This YAML is a documentation reference. The actual NetworkPolicy resources
+# are created by the Terraform tenant module (modules/tenant/main.tf).
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: TENANT_NAMESPACE
+  labels:
+    platform.infra/managed-by: terraform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

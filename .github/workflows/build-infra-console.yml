@@ -1,0 +1,126 @@
+name: Build infra-console image
+
+# Mirrors build-storage-broker.yml, including its pinned action SHAs.
+#
+# The image is NOT auto-deployed: var.infra_console_image is a digest pin, so a
+# new build only reaches the cluster when that pin is updated — the same rule
+# every other infra change follows.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docker/infra-console/**"
+      - "docker/telemetry-data/**"
+      - "docs/api/console-v1.yaml"
+      - "scripts/gen-mcp-tools.py"
+      - "scripts/gen-console.sh"
+      - "scripts/check-ghcr-pull.sh"
+      - ".github/workflows/build-infra-console.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "docker/infra-console/**"
+      - "docker/telemetry-data/**"
+      - "docs/api/console-v1.yaml"
+      - "scripts/gen-mcp-tools.py"
+      - "scripts/gen-console.sh"
+      - ".github/workflows/build-infra-console.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: idle-builders/idle-infra/infra-console
+
+jobs:
+  contract:
+    name: Contract and generated code
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Validate the contract
+        run: |
+          python3 -m pip install --quiet --user pyyaml
+          python3 tests/validate-console-spec.py docs/api/console-v1.yaml
+
+      # docs/api/console-v1.yaml is the single source for every generated file.
+      # Regenerating must be a no-op, or the committed surface has drifted from
+      # the contract it claims to implement.
+      #
+      # gen-console.sh --check, not an inlined regeneration of one file: the
+      # inlined version covered tools_gen.go only, so drift in the generated
+      # server never failed CI.
+      - name: Generated code is current
+        run: scripts/gen-console.sh --check
+
+  test:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    # Debian-based golang (ships git, which actions/checkout needs in-container).
+    container: golang:1.26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Format, vet and test
+        run: |
+          cd docker/infra-console
+          test -z "$(gofmt -l .)" || { echo "::error::gofmt reported unformatted files"; gofmt -l .; exit 1; }
+          go vet ./...
+          go test -count=1 ./...
+
+  build:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    needs: [contract, test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: docker/infra-console/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          build-args: |
+            VERSION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/idle-builders/idle-infra
+            org.opencontainers.image.description=Read-only console and MCP surface over platform state
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v0
+
+      - name: Digest to pin
+        if: github.event_name == 'push'
+        run: |
+          {
+            echo "Pin this in \`terraform/main/variables.tf\` (\`var.infra_console_image\`):"
+            echo '```'
+            echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

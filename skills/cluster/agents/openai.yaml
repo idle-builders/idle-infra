@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cluster"
+  short_description: "Manage the Kubernetes cluster"
+  default_prompt: "Use $cluster to inspect, scale, upgrade, or triage the Kubernetes cluster."

@@ -1,0 +1,26 @@
+# =============================================================================
+# k8s/network-policies/default-deny.yaml
+# =============================================================================
+#
+# Reference template: default-deny all ingress and egress for a tenant namespace.
+#
+# This YAML is a documentation reference. The actual NetworkPolicy resources
+# are created by the Terraform tenant module (modules/tenant/main.tf) using
+# kubernetes_network_policy resources.
+#
+# Usage (if applying manually for testing):
+#   kubectl apply -f this-file -n <tenant-namespace>
+#   Replace TENANT_NAMESPACE with the actual namespace name.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: TENANT_NAMESPACE
+  labels:
+    platform.infra/managed-by: terraform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

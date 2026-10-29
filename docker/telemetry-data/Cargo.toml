@@ -1,0 +1,22 @@
+[package]
+name = "telemetry-data"
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+
+[dependencies]
+anyhow = "1.0"
+arrow-array = "59.2.0"
+arrow-schema = "59.2.0"
+bytes = "1.10"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+flate2 = "1.1"
+futures = "0.3"
+hex = "0.4"
+object_store = { version = "0.14.1", default-features = false, features = ["aws", "http"] }
+parquet = { version = "59.2.0", default-features = false, features = ["arrow", "zstd"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.18", features = ["v4"] }

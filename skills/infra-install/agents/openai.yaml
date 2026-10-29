@@ -1,0 +1,4 @@
+interface:
+  display_name: "Infra Install"
+  short_description: "Install the infra skills device-wide"
+  default_prompt: "Use $infra-install to register the infra skills as a user-level plugin on this device."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Infra Debug"
+  short_description: "Diagnose a platform problem"
+  default_prompt: "Use $infra-debug to diagnose a platform problem and find the layer that owns it."

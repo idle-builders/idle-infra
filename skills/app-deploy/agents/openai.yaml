@@ -1,0 +1,4 @@
+interface:
+  display_name: "App Deploy"
+  short_description: "Set up and run an app's deployment"
+  default_prompt: "Use $app-deploy to scaffold a tenant application's Dockerfile, Helm chart, and CI pipeline, then deploy it and prove it is live."

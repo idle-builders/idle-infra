@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zitadel"
+  short_description: "Work with the identity provider"
+  default_prompt: "Use $zitadel to add login to an app or debug tokens against the shared Zitadel."

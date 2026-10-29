@@ -1,0 +1,33 @@
+# =============================================================================
+# k8s/network-policies/allow-postgres.yaml
+# =============================================================================
+#
+# Reference template: allow tenant namespace egress to PostgreSQL in the infra
+# namespace. Pod-scoped to pods with app.kubernetes.io/name=postgresql on
+# port 5432 TCP only.
+#
+# This YAML is a documentation reference. The actual NetworkPolicy resources
+# are created by the Terraform tenant module (modules/tenant/main.tf).
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres
+  namespace: TENANT_NAMESPACE
+  labels:
+    platform.infra/managed-by: terraform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infra
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432

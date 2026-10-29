@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tenant"
+  short_description: "Manage a tenant on the platform"
+  default_prompt: "Use $tenant to onboard, adjust, or decommission a tenant."

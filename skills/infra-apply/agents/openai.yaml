@@ -1,0 +1,4 @@
+interface:
+  display_name: "Infra Apply"
+  short_description: "Ship an infra change to production"
+  default_prompt: "Use $infra-apply to take an infrastructure change through PR, merge, apply, and live verification."

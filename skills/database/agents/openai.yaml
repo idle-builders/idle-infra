@@ -1,0 +1,4 @@
+interface:
+  display_name: "Database"
+  short_description: "Work with the shared PostgreSQL"
+  default_prompt: "Use $database to query, diagnose, or change the shared PostgreSQL."

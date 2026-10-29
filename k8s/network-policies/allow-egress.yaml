@@ -1,0 +1,38 @@
+# =============================================================================
+# k8s/network-policies/allow-egress.yaml
+# =============================================================================
+#
+# Reference template: allow internet egress for external API calls.
+# Excludes RFC1918 private address ranges to prevent lateral movement
+# to other cluster nodes or cloud VPC resources.
+#
+# Tenants need internet egress for:
+#   - GitHub Container Registry (ghcr.io) for image pulls
+#   - External APIs (payment, email, webhooks, etc.)
+#   - LLM providers (OpenRouter, Infomaniak AI, etc.)
+#
+# This YAML is a documentation reference. The actual NetworkPolicy resources
+# are created by the Terraform tenant module (modules/tenant/main.tf).
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internet-egress
+  namespace: TENANT_NAMESPACE
+  labels:
+    platform.infra/managed-by: terraform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

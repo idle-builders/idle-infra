@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "idle-infra",
+  "description": "Skills for operating the shared Infomaniak infrastructure platform.",
+  "owner": {
+    "name": "Idle Builders",
+    "url": "https://github.com/idle-builders"
+  },
+  "plugins": [
+    {
+      "name": "infra",
+      "source": "./",
+      "description": "14 skills for the shared platform: infra-install, cluster-access, infra-debug, infra-apply, infra-verify, infra-check, plus database, cluster, cloudflare, network, zitadel, storage, tenant, app-deploy. Every change ends in production evidence.",
+      "homepage": "https://github.com/idle-builders/idle-infra",
+      "keywords": [
+        "infrastructure",
+        "kubernetes",
+        "postgresql",
+        "terraform",
+        "opentofu",
+        "cloudflare",
+        "zitadel",
+        "platform",
+        "multi-tenant"
+      ]
+    }
+  ]
+}

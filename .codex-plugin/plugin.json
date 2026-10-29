@@ -1,0 +1,38 @@
+{
+  "name": "infra",
+  "description": "Operate the shared Infomaniak platform from any repository: diagnose a failure to the layer that owns it, take a change through PR, merge, apply and live proof, and work the database, cluster, Cloudflare edge, identity, object storage, network policy, tenants, and app deploys.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Idle Builders"
+  },
+  "homepage": "https://github.com/idle-builders/idle-infra",
+  "repository": "https://github.com/idle-builders/idle-infra",
+  "keywords": [
+    "infrastructure",
+    "kubernetes",
+    "postgresql",
+    "terraform",
+    "cloudflare",
+    "platform"
+  ],
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Infra",
+    "shortDescription": "Diagnose, change, and verify the shared infrastructure platform.",
+    "longDescription": "Infra packages operational skills for the shared Infomaniak platform: a symptom router for when something breaks, a change-to-production loop that ends in live evidence rather than a green pipeline, a verification tier picker, a health sweep, and domain skills for PostgreSQL, the Kubernetes cluster, the Cloudflare edge, Zitadel identity, object storage, network policy, tenant lifecycle, and application deploys.",
+    "developerName": "Idle Builders",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Review",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/idle-builders/idle-infra",
+    "defaultPrompt": [
+      "Is the platform healthy?",
+      "Something is broken \u2014 find out what.",
+      "Take this infrastructure change to production."
+    ],
+    "brandColor": "#0F766E"
+  }
+}

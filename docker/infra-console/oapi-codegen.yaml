@@ -1,0 +1,28 @@
+# oapi-codegen configuration for the infra-console read surface.
+#
+# Regenerate with scripts/gen-console.sh (runs in Docker; no local Go needed).
+# internal/api/gen.go is committed, and CI fails if regenerating changes it —
+# see docs/plans/infra-console.md (AC1).
+package: api
+output: internal/api/gen.go
+generate:
+  models: true
+  std-http-server: true
+  # false: the strict layer emits a parallel RequestObject/ResponseObject world
+  # plus StrictServerInterface and strictHandler — 2,034 lines nothing here
+  # referenced. Server implements api.ServerInterface directly (see the
+  # compile-time assertion in internal/httpapi/server.go).
+  strict-server: false
+  # embedded-spec is deliberately off: it pulls kin-openapi into the runtime
+  # dependency set, and nothing needs the spec at runtime — MCP tool
+  # definitions are generated statically, not enumerated from a live document.
+output-options:
+  # true = skip pruning, so every declared schema is emitted.
+  #
+  # This must stay true. Schemas reached only through an allOf Section payload
+  # (Capacity, Quota, TunnelStatus …) are invisible to the pruner, and with
+  # strict-server off nothing else referenced them — pruning silently dropped
+  # the types the source clients construct. The spec's own orphan check is what
+  # keeps the schema list honest, not the pruner.
+  skip-prune: true
+  user-templates: {}

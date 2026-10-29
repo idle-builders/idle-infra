@@ -1,0 +1,195 @@
+name: Build observability images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/otel-collector/**"
+      - "docker/telemetry-data/**"
+      - "scripts/check-ghcr-pull.sh"
+      - "scripts/observability-affected-images.sh"
+      - ".github/workflows/build-observability.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docker/otel-collector/**"
+      - "docker/telemetry-data/**"
+      - "scripts/check-ghcr-pull.sh"
+      - "scripts/observability-affected-images.sh"
+      - ".github/workflows/build-observability.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  REGISTRY: ghcr.io
+  LOCAL_COLLECTOR_IMAGE: local/otel-collector:${{ github.sha }}
+  LOCAL_TELEMETRY_IMAGE: local/telemetry-data:${{ github.sha }}
+
+jobs:
+  verify:
+    name: Runtime images and S3 path
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect affected runtime images
+        id: affected
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          {
+            if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              git diff --name-only "${BASE_SHA}" "${HEAD_SHA}"
+            else
+              git show --pretty='' --name-only "${HEAD_SHA}"
+            fi
+          } | scripts/observability-affected-images.sh >> "${GITHUB_OUTPUT}"
+
+      - name: Select integration images
+        env:
+          COLLECTOR_AFFECTED: ${{ steps.affected.outputs.collector }}
+          TELEMETRY_AFFECTED: ${{ steps.affected.outputs.telemetry }}
+        run: |
+          if [ "${COLLECTOR_AFFECTED}" = true ]; then
+            echo "COLLECTOR_IMAGE=${LOCAL_COLLECTOR_IMAGE}" >> "${GITHUB_ENV}"
+          else
+            echo "COLLECTOR_IMAGE=${REGISTRY}/idle-builders/idle-infra/otel-collector:v0" >> "${GITHUB_ENV}"
+          fi
+          if [ "${TELEMETRY_AFFECTED}" = true ]; then
+            echo "TELEMETRY_IMAGE=${LOCAL_TELEMETRY_IMAGE}" >> "${GITHUB_ENV}"
+          else
+            echo "TELEMETRY_IMAGE=${REGISTRY}/idle-builders/idle-infra/telemetry-data:v0" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Log in to GHCR for unchanged integration images
+        if: steps.affected.outputs.collector != 'true' || steps.affected.outputs.telemetry != 'true'
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Collector
+        if: steps.affected.outputs.collector == 'true'
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: docker/otel-collector
+          load: true
+          tags: ${{ env.LOCAL_COLLECTOR_IMAGE }}
+
+      - name: Validate full Collector configuration
+        if: steps.affected.outputs.collector == 'true'
+        run: |
+          mkdir -p /tmp/otel-state /tmp/otel-sa
+          printf 'observability' > /tmp/otel-sa/namespace
+          printf 'validation-token' > /tmp/otel-sa/token
+          cp /etc/ssl/certs/ca-certificates.crt /tmp/otel-sa/ca.crt
+          docker run --rm --user 0 \
+            -e K8S_NODE_NAME=validation-node \
+            -e K8S_NODE_IP=127.0.0.1 \
+            -e S3_ENDPOINT=https://s3.example.test \
+            -e S3_REGION=us-east-1 \
+            -e S3_BUCKET=validation \
+            -e AWS_ACCESS_KEY_ID=validation \
+            -e AWS_SECRET_ACCESS_KEY=validation \
+            -v /tmp/otel-state:/var/lib/otelcol \
+            -v /tmp/otel-sa:/var/run/secrets/kubernetes.io/serviceaccount:ro \
+            "${COLLECTOR_IMAGE}" validate --config=/etc/otelcol-infra/config.yaml
+
+      - name: Scan Collector runtime image
+        if: steps.affected.outputs.collector == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_COLLECTOR_IMAGE }}
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+
+      - name: Build and test compactor
+        if: steps.affected.outputs.telemetry == 'true'
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: docker/telemetry-data
+          load: true
+          tags: ${{ env.LOCAL_TELEMETRY_IMAGE }}
+
+      - name: Scan compactor runtime image
+        if: steps.affected.outputs.telemetry == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_TELEMETRY_IMAGE }}
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+
+      - name: Prove Collector queue recovery and three-signal compaction
+        run: docker/telemetry-data/integration/test.sh
+
+  publish:
+    name: Publish runtime images
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect affected runtime images
+        id: affected
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          {
+            if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              git diff --name-only "${BASE_SHA}" "${HEAD_SHA}"
+            else
+              git show --pretty='' --name-only "${HEAD_SHA}"
+            fi
+          } | scripts/observability-affected-images.sh >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Collector
+        if: steps.affected.outputs.collector == 'true'
+        id: collector
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: docker/otel-collector
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/idle-builders/idle-infra/otel-collector:v0
+            ${{ env.REGISTRY }}/idle-builders/idle-infra/otel-collector:${{ github.sha }}
+
+      - name: Build, test, and push compactor
+        if: steps.affected.outputs.telemetry == 'true'
+        id: compactor
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: docker/telemetry-data
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/idle-builders/idle-infra/telemetry-data:v0
+            ${{ env.REGISTRY }}/idle-builders/idle-infra/telemetry-data:${{ github.sha }}

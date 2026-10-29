@@ -1,0 +1,44 @@
+dist:
+  module: github.com/idle-builders/idle-infra/otelcol-infra
+  name: otelcol-infra
+  description: Minimal OpenTelemetry collector for the Ambrovia infrastructure cluster
+  version: 0.1.0
+  output_path: ./_build
+  otelcol_version: 0.159.0
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/k8sleaderelector v0.159.0
+
+exporters:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awss3exporter v0.159.0
+
+connectors:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/connector/signaltometricsconnector v0.159.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/attributesprocessor v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.159.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filelogreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sobjectsreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kubeletstatsreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.159.0
+
+# AWS transfermanager currently forces aws-chunked CRC32 trailers even when
+# checksum calculation is configured for WHEN_REQUIRED. Replace only that
+# transport wrapper; keep the current exporter and its durable retry support.
+replaces:
+  - github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager => ../transfermanager
+  # Security patch floors for transitive dependencies of the v0.159.0 modules
+  # (Trivy HIGH): CVE-2026-56854 and CVE-2026-84304/CVE-2026-84445. Remove
+  # once the pinned collector release requires these versions itself.
+  - golang.org/x/crypto => golang.org/x/crypto v0.55.0
+  - google.golang.org/grpc => google.golang.org/grpc v1.83.2
