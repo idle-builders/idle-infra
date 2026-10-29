@@ -1094,6 +1094,7 @@ resource "kubernetes_cron_job_v1" "pg_backup" {
 
   spec {
     schedule                      = "0 2 * * *"
+    suspend                       = var.pg_backup_suspended
     concurrency_policy            = "Forbid"
     failed_jobs_history_limit     = 3
     successful_jobs_history_limit = 3

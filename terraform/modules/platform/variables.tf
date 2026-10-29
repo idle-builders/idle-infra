@@ -84,6 +84,12 @@ variable "pg_admin_password" {
   description = "PostgreSQL superuser (postgres) password for the self-hosted PG instance."
 }
 
+variable "pg_backup_suspended" {
+  type        = bool
+  default     = false
+  description = "Suspend scheduled PostgreSQL backups when the deployment operator explicitly disables them."
+}
+
 variable "pg_backup_image" {
   type        = string
   description = "Container image for the in-cluster PostgreSQL backup CronJob."
