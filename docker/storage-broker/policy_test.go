@@ -10,14 +10,14 @@ func testPolicy() *Policy {
 	return &Policy{
 		DefaultTTLSeconds: TTLConfig{Get: 900, Put: 300, Delete: 120, Multipart: 900},
 		Namespaces: map[string]NamespacePolicy{
-			"ambrovia": {
-				Bucket:           "ambrovia-files",
+			"atlas": {
+				Bucket:           "atlas-files",
 				Ops:              []string{"get", "put", "delete"},
 				RequireUserToken: true,
 				Prefixes:         []string{"u/${sub}/"},
 			},
-			"nimmly": {
-				Bucket:           "nimmly-files",
+			"acme": {
+				Bucket:           "acme-files",
 				Ops:              []string{"get", "put", "delete", "multipart"},
 				RequireUserToken: false,
 				// One user-bound prefix and two literal app-layer prefixes.
@@ -41,40 +41,40 @@ func TestAuthorize(t *testing.T) {
 		wantTTL   int
 	}{
 		// App scope / bucket derivation.
-		{"personal put allowed", "ambrovia", "put", "u/user-123/report.pdf", "user-123", true, "ambrovia-files", 300},
-		{"personal get allowed", "ambrovia", "get", "u/user-123/report.pdf", "user-123", true, "ambrovia-files", 900},
-		{"delete allowed", "ambrovia", "delete", "u/user-123/old.pdf", "user-123", true, "ambrovia-files", 120},
-		{"shared literal prefix allowed (nimmly)", "nimmly", "get", "corpus/registry/zh.json", "", true, "nimmly-files", 900},
-		{"private intake prefix allowed (nimmly)", "nimmly", "put", "private-intake/workspace/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/raw/sha256/ab/abcdef", "", true, "nimmly-files", 300},
+		{"personal put allowed", "atlas", "put", "u/user-123/report.pdf", "user-123", true, "atlas-files", 300},
+		{"personal get allowed", "atlas", "get", "u/user-123/report.pdf", "user-123", true, "atlas-files", 900},
+		{"delete allowed", "atlas", "delete", "u/user-123/old.pdf", "user-123", true, "atlas-files", 120},
+		{"shared literal prefix allowed (acme)", "acme", "get", "corpus/registry/zh.json", "", true, "acme-files", 900},
+		{"private intake prefix allowed (acme)", "acme", "put", "private-intake/workspace/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/raw/sha256/ab/abcdef", "", true, "acme-files", 300},
 
 		// User scope.
-		{"other user's prefix denied", "ambrovia", "get", "u/user-999/report.pdf", "user-123", false, "", 0},
-		{"user token required but missing", "ambrovia", "put", "u/user-123/x.pdf", "", false, "", 0},
+		{"other user's prefix denied", "atlas", "get", "u/user-999/report.pdf", "user-123", false, "", 0},
+		{"user token required but missing", "atlas", "put", "u/user-123/x.pdf", "", false, "", 0},
 
 		// Op scope.
-		{"delete allowed (nimmly scratchpad mapping)", "nimmly", "delete", "corpus/scratchpads/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/result.json", "", true, "nimmly-files", 120},
+		{"delete allowed (acme scratchpad mapping)", "acme", "delete", "corpus/scratchpads/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/result.json", "", true, "acme-files", 120},
 
 		// Multipart op (streaming large corpus objects).
-		{"multipart allowed (nimmly corpus)", "nimmly", "multipart", "corpus/shab/y.txt", "", true, "nimmly-files", 900},
-		{"multipart denied (ambrovia lacks op)", "ambrovia", "multipart", "u/user-123/big.bin", "user-123", false, "", 0},
+		{"multipart allowed (acme corpus)", "acme", "multipart", "corpus/shab/y.txt", "", true, "acme-files", 900},
+		{"multipart denied (atlas lacks op)", "atlas", "multipart", "u/user-123/big.bin", "user-123", false, "", 0},
 
 		// Cross-app / unknown namespace.
 		{"unknown namespace denied", "evil", "get", "u/user-123/x", "user-123", false, "", 0},
 
 		// Key not within any prefix.
-		{"key outside allowed prefixes", "nimmly", "get", "secret/passwd", "", false, "", 0},
+		{"key outside allowed prefixes", "acme", "get", "secret/passwd", "", false, "", 0},
 
 		// Key validation.
-		{"path traversal denied", "ambrovia", "get", "u/user-123/../../etc/passwd", "user-123", false, "", 0},
-		{"absolute key denied", "ambrovia", "get", "/u/user-123/x", "user-123", false, "", 0},
-		{"trailing slash (prefix) denied", "ambrovia", "get", "u/user-123/", "user-123", false, "", 0},
-		{"empty key denied", "ambrovia", "get", "", "user-123", false, "", 0},
-		{"backslash denied", "ambrovia", "get", "u/user-123/a\\b", "user-123", false, "", 0},
-		{"double slash denied", "ambrovia", "get", "u/user-123//x", "user-123", false, "", 0},
+		{"path traversal denied", "atlas", "get", "u/user-123/../../etc/passwd", "user-123", false, "", 0},
+		{"absolute key denied", "atlas", "get", "/u/user-123/x", "user-123", false, "", 0},
+		{"trailing slash (prefix) denied", "atlas", "get", "u/user-123/", "user-123", false, "", 0},
+		{"empty key denied", "atlas", "get", "", "user-123", false, "", 0},
+		{"backslash denied", "atlas", "get", "u/user-123/a\\b", "user-123", false, "", 0},
+		{"double slash denied", "atlas", "get", "u/user-123//x", "user-123", false, "", 0},
 
 		// Subject injection.
-		{"subject with slash denied", "ambrovia", "get", "u/a/b/x", "a/b", false, "", 0},
-		{"subject with traversal denied", "ambrovia", "get", "u/../x", "..", false, "", 0},
+		{"subject with slash denied", "atlas", "get", "u/a/b/x", "a/b", false, "", 0},
+		{"subject with traversal denied", "atlas", "get", "u/../x", "..", false, "", 0},
 	}
 
 	for _, tc := range cases {
@@ -99,11 +99,11 @@ func TestAuthorize(t *testing.T) {
 
 func TestAuthorizeNeverCrossesBuckets(t *testing.T) {
 	p := testPolicy()
-	// A valid request in ambrovia must never yield nimmly's bucket, regardless of key.
-	for _, key := range []string{"u/u1/nimmly-files/x", "u/u1/../nimmly/x", "u/u1/x"} {
-		d, err := p.Authorize("ambrovia", "get", key, "u1")
-		if err == nil && d.Bucket != "ambrovia-files" {
-			t.Fatalf("ambrovia request resolved to bucket %q for key %q", d.Bucket, key)
+	// A valid request in atlas must never yield acme's bucket, regardless of key.
+	for _, key := range []string{"u/u1/acme-files/x", "u/u1/../acme/x", "u/u1/x"} {
+		d, err := p.Authorize("atlas", "get", key, "u1")
+		if err == nil && d.Bucket != "atlas-files" {
+			t.Fatalf("atlas request resolved to bucket %q for key %q", d.Bucket, key)
 		}
 	}
 }

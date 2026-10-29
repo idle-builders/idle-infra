@@ -2030,7 +2030,7 @@ mod tests {
     #[test]
     fn overview_deduplicates_warning_events() {
         let mut first = row("logs", 10_000_000_000);
-        first.k8s_namespace = Some("nimmly".into());
+        first.k8s_namespace = Some("acme".into());
         first.body_json = Some(r#"{"object":{"type":"Warning","reason":"Unhealthy","note":"readiness failed","regarding":{"kind":"Pod","name":"worker-abc"}},"type":"ADDED"}"#.into());
         let mut second = first.clone();
         second.timestamp_ns = 20_000_000_000;
@@ -2053,7 +2053,7 @@ mod tests {
             r#"{"k8s.deployment.name":"api","k8s.pod.uid":"pod-a","k8s.container.name":"api"}"#;
         let mut old = row("metrics", 10_000_000_000);
         old.name = Some("container.memory.working_set".into());
-        old.k8s_namespace = Some("nimmly".into());
+        old.k8s_namespace = Some("acme".into());
         old.workload = Some("api".into());
         old.body_json = Some(r#"{"asInt":"10"}"#.into());
         old.resource_json = resource.into();
@@ -2064,7 +2064,7 @@ mod tests {
         let out = build_overview(vec![old, latest], QueryParams::for_test(0, 30_000_000_000));
 
         assert_eq!(out.workloads.len(), 1);
-        assert_eq!(out.workloads[0].namespace, "nimmly");
+        assert_eq!(out.workloads[0].namespace, "acme");
         assert_eq!(out.workloads[0].workload, "api");
         assert_eq!(out.workloads[0].memory_working_set_bytes, Some(25));
     }
@@ -2073,7 +2073,7 @@ mod tests {
     fn namespace_and_workload_filters_bound_results() {
         let mut wanted = row("metrics", 10_000_000_000);
         wanted.name = Some("container.cpu.usage".into());
-        wanted.k8s_namespace = Some("nimmly".into());
+        wanted.k8s_namespace = Some("acme".into());
         wanted.workload = Some("worker".into());
         wanted.body_json = Some(r#"{"asDouble":0.25}"#.into());
         wanted.resource_json = r#"{"k8s.deployment.name":"worker","k8s.pod.uid":"pod-a","k8s.container.name":"worker"}"#.into();
@@ -2082,7 +2082,7 @@ mod tests {
         other.workload = Some("console".into());
 
         let mut params = QueryParams::for_test(0, 30_000_000_000);
-        params.namespace = Some("nimmly".into());
+        params.namespace = Some("acme".into());
         params.workload = Some("worker".into());
         let out = build_overview(vec![wanted, other], params);
 
@@ -2135,7 +2135,7 @@ mod tests {
         fn metric(name: &str, pod: &str, timestamp_ns: i64, value: &str) -> QueryRow {
             let mut point = row("metrics", timestamp_ns);
             point.name = Some(name.into());
-            point.k8s_namespace = Some("nimmly".into());
+            point.k8s_namespace = Some("acme".into());
             point.workload = Some("worker".into());
             point.body_json = Some(value.into());
             point.resource_json = format!(
@@ -2627,8 +2627,8 @@ mod tests {
     #[test]
     fn application_summary_is_complete_while_trace_and_logs_are_one_sample() {
         let mut summary = row("application_metrics", 20_000_000_000);
-        summary.service_namespace = Some("nimmly".into());
-        summary.service_name = Some("nimmly-api".into());
+        summary.service_namespace = Some("acme".into());
+        summary.service_name = Some("acme-api".into());
         summary.body_json = Some(
             r#"{"operation":"GET /health","operationKind":"http","executions":100,"successful":97,"rejected":2,"failed":1,"durationCount":100,"durationSumSeconds":8.0,"durationBounds":[0.05,0.1],"durationBucketCounts":[40,55,5],"sampledExecutions":1}"#.into(),
         );
@@ -2639,8 +2639,8 @@ mod tests {
         trace.name = Some("GET /health".into());
         trace.trace_id = Some("abc".into());
         trace.span_id = Some("root".into());
-        trace.service_namespace = Some("nimmly".into());
-        trace.service_name = Some("nimmly-api".into());
+        trace.service_namespace = Some("acme".into());
+        trace.service_name = Some("acme-api".into());
         trace.attributes_json =
             r#"{"infra.operation.kind":"http","infra.execution.outcome":"error","telemetry.sample.reason":"failure","telemetry.sample.bundle_complete":true}"#.into();
 
@@ -2652,15 +2652,15 @@ mod tests {
         child.span_id = Some("child".into());
         child.parent_span_id = Some("root".into());
         child.status_code = Some("2".into());
-        child.service_namespace = Some("nimmly".into());
+        child.service_namespace = Some("acme".into());
         child.service_name = Some("storage-broker".into());
         child.attributes_json =
             r#"{"server.address":"database","error.type":"timeout","telemetry.sample.reason":"failure","telemetry.sample.bundle_complete":true}"#.into();
 
         let mut log = row("logs", 10_080_000_000);
         log.trace_id = Some("abc".into());
-        log.service_namespace = Some("nimmly".into());
-        log.service_name = Some("nimmly-api".into());
+        log.service_namespace = Some("acme".into());
+        log.service_name = Some("acme-api".into());
         log.severity_number = Some(17);
         log.severity_text = Some("ERROR".into());
         log.body_json = Some(r#""request failed""#.into());
@@ -2713,14 +2713,14 @@ mod tests {
     #[test]
     fn application_drop_evidence_and_standalone_errors_are_visible() {
         let mut summary = row("application_metrics", 20_000_000_000);
-        summary.service_namespace = Some("nimmly".into());
-        summary.service_name = Some("nimmly-api".into());
+        summary.service_namespace = Some("acme".into());
+        summary.service_name = Some("acme-api".into());
         summary.body_json = Some(
             r#"{"operation":"GET /health","operationKind":"http","executions":1,"successful":1,"rejected":0,"failed":0,"durationBounds":[],"durationBucketCounts":[1],"sampledExecutions":0,"telemetryLossObserved":true}"#.into(),
         );
         let mut log = row("logs", 21_000_000_000);
-        log.service_namespace = Some("nimmly".into());
-        log.service_name = Some("nimmly-api".into());
+        log.service_namespace = Some("acme".into());
+        log.service_name = Some("acme-api".into());
         log.severity_number = Some(17);
         log.severity_text = Some("ERROR".into());
         log.body_json = Some(r#""uncorrelated failure""#.into());
@@ -2741,8 +2741,8 @@ mod tests {
         let mut log = row("logs", 21_000_000_000);
         log.trace_id = Some("missing-root".into());
         log.span_id = Some("missing-span".into());
-        log.service_namespace = Some("nimmly".into());
-        log.service_name = Some("nimmly-api".into());
+        log.service_namespace = Some("acme".into());
+        log.service_name = Some("acme-api".into());
         log.severity_number = Some(17);
         log.severity_text = Some("ERROR".into());
         log.body_json = Some(r#""request failed""#.into());
@@ -2764,15 +2764,15 @@ mod tests {
         root.trace_id = Some("late".into());
         root.span_id = Some("root".into());
         root.name = Some("GET /health".into());
-        root.service_namespace = Some("nimmly".into());
-        root.service_name = Some("nimmly-api".into());
+        root.service_namespace = Some("acme".into());
+        root.service_name = Some("acme-api".into());
         root.attributes_json = r#"{"infra.operation.kind":"http","infra.execution.outcome":"success","telemetry.sample.reason":"slow","telemetry.sample.bundle_complete":true}"#.into();
 
         let mut log = row("logs", 20_000_000_000);
         log.trace_id = Some("late".into());
         log.span_id = Some("root".into());
-        log.service_namespace = Some("nimmly".into());
-        log.service_name = Some("nimmly-api".into());
+        log.service_namespace = Some("acme".into());
+        log.service_name = Some("acme-api".into());
         log.severity_number = Some(17);
         log.severity_text = Some("ERROR".into());
         log.body_json = Some(r#""request failed""#.into());
@@ -2793,8 +2793,8 @@ mod tests {
         api.trace_id = Some("shared".into());
         api.span_id = Some("api-root".into());
         api.name = Some("POST /crawl".into());
-        api.service_namespace = Some("nimmly".into());
-        api.service_name = Some("nimmly-api".into());
+        api.service_namespace = Some("acme".into());
+        api.service_name = Some("acme-api".into());
         api.attributes_json = r#"{"infra.operation.kind":"http","infra.execution.outcome":"success","telemetry.sample.reason":"slow","telemetry.sample.bundle_complete":true}"#.into();
 
         let mut worker = api.clone();
@@ -2804,7 +2804,7 @@ mod tests {
         worker.span_id = Some("worker-root".into());
         worker.parent_span_id = Some("api-root".into());
         worker.name = Some("process browser".into());
-        worker.service_name = Some("nimmly-worker".into());
+        worker.service_name = Some("acme-worker".into());
         worker.attributes_json = r#"{"infra.operation.kind":"crawler","infra.execution.outcome":"success","telemetry.sample.reason":"slow","telemetry.sample.bundle_complete":true}"#.into();
 
         let mut dependency = worker.clone();
@@ -2817,44 +2817,44 @@ mod tests {
         dependency.attributes_json = r#"{"server.address":"browser-renderer","telemetry.sample.reason":"slow","telemetry.sample.bundle_complete":true}"#.into();
 
         let mut params = QueryParams::for_test(0, 30_000_000_000);
-        params.service = Some("nimmly-api".into());
+        params.service = Some("acme-api".into());
         let out = build_overview([api, worker, dependency], params);
 
         assert_eq!(out.applications.len(), 1);
-        assert_eq!(out.applications[0].service, "nimmly-api");
+        assert_eq!(out.applications[0].service, "acme-api");
         assert_eq!(out.applications[0].samples[0].spans.len(), 3);
         assert_eq!(
             out.applications[0].samples[0].spans[1].service,
-            "nimmly-worker"
+            "acme-worker"
         );
     }
 
     #[test]
     fn service_filter_selects_only_the_requested_application() {
         let mut wanted = row("application_metrics", 20_000_000_000);
-        wanted.service_namespace = Some("nimmly".into());
-        wanted.service_name = Some("nimmly-api".into());
+        wanted.service_namespace = Some("acme".into());
+        wanted.service_name = Some("acme-api".into());
         wanted.body_json = Some(
             r#"{"operation":"GET /health","operationKind":"http","executions":1,"successful":1,"rejected":0,"failed":0,"durationBounds":[],"durationBucketCounts":[1],"sampledExecutions":0}"#.into(),
         );
         let mut other = wanted.clone();
-        other.service_name = Some("nimmly-worker".into());
+        other.service_name = Some("acme-worker".into());
         let mut params = QueryParams::for_test(0, 30_000_000_000);
-        params.service = Some("nimmly-api".into());
+        params.service = Some("acme-api".into());
 
         let out = build_overview([wanted, other], params);
 
         assert_eq!(out.applications.len(), 1);
-        assert_eq!(out.applications[0].service, "nimmly-api");
+        assert_eq!(out.applications[0].service, "acme-api");
     }
 
     #[test]
     fn application_detail_budget_is_fair_and_does_not_change_total_completeness() {
         let mut rows = Vec::new();
-        for service in ["nimmly-api", "nimmly-worker"] {
+        for service in ["acme-api", "acme-worker"] {
             for operation in ["GET /one", "GET /two"] {
                 let mut summary = row("application_metrics", 20_000_000_000);
-                summary.service_namespace = Some("nimmly".into());
+                summary.service_namespace = Some("acme".into());
                 summary.service_name = Some(service.into());
                 summary.body_json = Some(format!(
                     r#"{{"operation":"{operation}","operationKind":"http","executions":1,"successful":1,"rejected":0,"failed":0,"durationBounds":[],"durationBucketCounts":[1],"sampledExecutions":0}}"#

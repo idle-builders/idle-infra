@@ -19,7 +19,7 @@ func (r *countingReviewer) Review(context.Context, string) (string, string, erro
 	if r.err != nil {
 		return "", "", r.err
 	}
-	return "nimmly", "publisher", nil
+	return "acme", "publisher", nil
 }
 
 func testJWT(expiry time.Time) string {

@@ -1,5 +1,5 @@
 # =============================================================================
-# KEDA — nimmly crawler execution-capacity autoscaling
+# KEDA — application execution-capacity autoscaling
 # =============================================================================
 resource "kubernetes_namespace" "keda" {
   metadata {

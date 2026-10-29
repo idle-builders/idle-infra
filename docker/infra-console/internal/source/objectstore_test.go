@@ -10,7 +10,7 @@ func TestStorageSummaryUsesExactSwiftMetadata(t *testing.T) {
 	headers.Set("X-Container-Object-Count", "3256079")
 	headers.Set("X-Container-Bytes-Used", "102325924290")
 
-	got, err := storageSummary("nimmly-files", "https://objects.example/v1/AUTH_project", headers)
+	got, err := storageSummary("acme-files", "https://objects.example/v1/AUTH_project", headers)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -139,7 +139,7 @@ variable "ducklake_root" {
 variable "ducklake_max_put_bytes" {
   type        = number
   default     = 100663296
-  description = "Maximum governed DuckLake single-PUT body size (96 MiB; headroom over nimmly's 32 MB target file size)."
+  description = "Maximum governed DuckLake single-PUT body size (96 MiB; headroom for 32 MB target data files)."
 }
 
 variable "lake_operation_timeout" {

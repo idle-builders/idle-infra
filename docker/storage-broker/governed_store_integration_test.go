@@ -43,18 +43,18 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
 
-	publicObject := registerStoreObject(t, ctx, store, "nimmly", TenantStorageScope(), "public.parquet")
-	workspaceObject := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceA), "a.parquet")
-	otherWorkspaceObject := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceB), "b.parquet")
-	otherTenantObject := registerStoreObject(t, ctx, store, "ambrovia", TenantStorageScope(), "other-tenant.parquet")
+	publicObject := registerStoreObject(t, ctx, store, "acme", TenantStorageScope(), "public.parquet")
+	workspaceObject := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceA), "a.parquet")
+	otherWorkspaceObject := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceB), "b.parquet")
+	otherTenantObject := registerStoreObject(t, ctx, store, "atlas", TenantStorageScope(), "other-tenant.parquet")
 	reservedObject, err := store.ReserveObject(ctx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 		ArtifactClass: ArtifactTransformationSQL, ContentHash: testContentHash,
-		ByteSize: 12, MediaType: "text/sql", Bucket: "nimmly-files",
+		ByteSize: 12, MediaType: "text/sql", Bucket: "acme-files",
 		Key: governedReservationKey(WorkspaceStorageScope(workspaceA), ArtifactTransformationSQL,
 			"44444444-4444-4444-8444-444444444444"),
 		CleanupOwnerID: "22222222-2222-4222-8222-222222222222",
@@ -62,12 +62,12 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	if err != nil || reservedObject.State != ObjectStateReserved {
 		t.Fatalf("reserve governed object = %#v, %v", reservedObject, err)
 	}
-	if _, err := store.AuthorizeObjectReservation(ctx, "ambrovia", reservedObject.ID); !errors.Is(err, ErrGovernedDenied) {
+	if _, err := store.AuthorizeObjectReservation(ctx, "atlas", reservedObject.ID); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("other-tenant reservation authorization error = %v", err)
 	}
 	finalKey := governedObjectKey(reservedObject.Scope, reservedObject.ArtifactClass,
 		reservedObject.ContentHash, reservedObject.ID)
-	activatedObject, err := store.ActivateObject(ctx, "nimmly", reservedObject.ID,
+	activatedObject, err := store.ActivateObject(ctx, "acme", reservedObject.ID,
 		reservedObject.Bucket, finalKey)
 	if err != nil || activatedObject.State != ObjectStateActive {
 		t.Fatalf("activate governed object = %#v, %v", activatedObject, err)
@@ -77,7 +77,7 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	}
 
 	grantInput := IssueGrantInput{
-		Tenant:                  "nimmly",
+		Tenant:                  "acme",
 		Scope:                   WorkspaceStorageScope(workspaceA),
 		ExecutionID:             "33333333-3333-4333-8333-333333333333",
 		ReadableObjectIDs:       []string{publicObject.ID, workspaceObject.ID},
@@ -142,35 +142,35 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	}
 
 	if _, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: workspaceObject.ID, Now: time.Now(),
 	}); err != nil {
 		t.Fatalf("consume same-workspace object: %v", err)
 	}
 	if _, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: otherWorkspaceObject.ID, Now: time.Now(),
 	}); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("consume undeclared other-workspace object error = %v", err)
 	}
 	if _, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "ambrovia", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "atlas", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: workspaceObject.ID, Now: time.Now(),
 	}); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("consume other-tenant grant error = %v", err)
 	}
 	if _, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: publicObject.ID, Now: grantInput.ExpiresAt.Add(time.Second),
 	}); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("consume expired grant error = %v", err)
 	}
 
 	output, err := store.ReserveGrantOutput(ctx, ReserveGrantOutputInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ArtifactClass: ArtifactSandboxRelation, ContentHash: testContentHash,
 		ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-		Bucket: "nimmly-files", Now: time.Now(),
+		Bucket: "acme-files", Now: time.Now(),
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 		t.Fatalf("reserved output state = %q, want reserved", output.State)
 	}
 	reserved, err := store.AuthorizeGrantOutputReservation(ctx, GrantOutputReservationInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: output.ID, Now: time.Now(),
 	})
 	if err != nil || reserved.ID != output.ID {
@@ -190,32 +190,32 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	}
 	finalOutputKey := governedObjectKey(output.Scope, output.ArtifactClass, output.ContentHash, output.ID)
 	activated, err := store.ActivateGrantOutput(ctx, GrantOutputReservationInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: output.ID, Now: time.Now(),
 	}, output.Bucket, finalOutputKey)
 	if err != nil || activated.State != ObjectStateActive {
 		t.Fatalf("activate output = %#v, %v", activated, err)
 	}
 	if _, err := store.ReserveGrantOutput(ctx, ReserveGrantOutputInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ArtifactClass: ArtifactSandboxDiagnostic, ContentHash: testContentHash,
-		ByteSize: 12, MediaType: "application/json", Bucket: "nimmly-files",
+		ByteSize: 12, MediaType: "application/json", Bucket: "acme-files",
 		Now: time.Now(),
 	}, nil); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("undeclared output class error = %v", err)
 	}
 
-	if err := store.RevokeGrant(ctx, "nimmly", grant.ID, time.Now()); err != nil {
+	if err := store.RevokeGrant(ctx, "acme", grant.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: publicObject.ID, Now: time.Now(),
 	}); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("consume revoked grant error = %v", err)
 	}
 
-	unlockLakePath, err := store.AcquireLakePathLock(ctx, "nimmly", "nimmly-files",
+	unlockLakePath, err := store.AcquireLakePathLock(ctx, "acme", "acme-files",
 		"ducklake/main/public/ducklake-public.parquet")
 	if err != nil {
 		t.Fatalf("acquire lake path lock: %v", err)
@@ -223,29 +223,29 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	unlockLakePath()
 
 	lakePublic, err := store.ReserveLakeObject(ctx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: TenantStorageScope(), ArtifactClass: ArtifactDuckLakeData,
+		Tenant: "acme", Scope: TenantStorageScope(), ArtifactClass: ArtifactDuckLakeData,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-		Bucket: "nimmly-files", Key: "ducklake/main/public/ducklake-public.parquet",
+		Bucket: "acme-files", Key: "ducklake/main/public/ducklake-public.parquet",
 	})
 	if err != nil || lakePublic.State != ObjectStateReserved {
 		t.Fatalf("reserve lake object = %#v, %v", lakePublic, err)
 	}
-	if _, err := store.ReadLakeObject(ctx, "nimmly", TenantStorageScope(), lakePublic.Bucket, lakePublic.Key); !errors.Is(err, ErrGovernedDenied) {
+	if _, err := store.ReadLakeObject(ctx, "acme", TenantStorageScope(), lakePublic.Bucket, lakePublic.Key); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("reserved lake read error = %v", err)
 	}
-	lakePublic, err = store.ActivateLakeObject(ctx, "nimmly", lakePublic.ID)
+	lakePublic, err = store.ActivateLakeObject(ctx, "acme", lakePublic.ID)
 	if err != nil || lakePublic.State != ObjectStateActive || lakePublic.Key != "ducklake/main/public/ducklake-public.parquet" {
 		t.Fatalf("activate exact-path lake object = %#v, %v", lakePublic, err)
 	}
 	if replay, err := store.ReserveLakeObject(ctx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: TenantStorageScope(), ArtifactClass: ArtifactDuckLakeData,
+		Tenant: "acme", Scope: TenantStorageScope(), ArtifactClass: ArtifactDuckLakeData,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
 		Bucket: lakePublic.Bucket, Key: lakePublic.Key,
 	}); err != nil || replay.ID != lakePublic.ID || replay.State != ObjectStateActive {
 		t.Fatalf("active lake retry = %#v, %v", replay, err)
 	}
 	if _, err := store.ReserveLakeObject(ctx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactDuckLakeData,
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactDuckLakeData,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
 		Bucket: lakePublic.Bucket, Key: lakePublic.Key,
 	}); !errors.Is(err, ErrGovernedConflict) {
@@ -253,14 +253,14 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	}
 
 	lakePrivate, err := store.ReserveLakeObject(ctx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactDuckLakeData,
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactDuckLakeData,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-		Bucket: "nimmly-files", Key: "ducklake/main/private/ducklake-private.parquet",
+		Bucket: "acme-files", Key: "ducklake/main/private/ducklake-private.parquet",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	lakePrivate, err = store.ActivateLakeObject(ctx, "nimmly", lakePrivate.ID)
+	lakePrivate, err = store.ActivateLakeObject(ctx, "acme", lakePrivate.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 		{"cross workspace denied", WorkspaceStorageScope(workspaceB), lakePrivate, false},
 	} {
 		t.Run("lake read "+read.name, func(t *testing.T) {
-			_, err := store.ReadLakeObject(ctx, "nimmly", read.scope, read.object.Bucket, read.object.Key)
+			_, err := store.ReadLakeObject(ctx, "acme", read.scope, read.object.Bucket, read.object.Key)
 			if read.allow && err != nil {
 				t.Fatalf("ReadLakeObject() error = %v", err)
 			}
@@ -286,20 +286,20 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 			}
 		})
 	}
-	if _, err := store.DeleteLakeObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if _, err := store.DeleteLakeObject(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		lakePublic.Bucket, lakePublic.Key, time.Now()); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("workspace delete of public lake object error = %v", err)
 	}
-	deleted, err := store.DeleteLakeObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	deleted, err := store.DeleteLakeObject(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		lakePrivate.Bucket, lakePrivate.Key, time.Now())
 	if err != nil || deleted.State != ObjectStateDeleted {
 		t.Fatalf("delete lake object = %#v, %v", deleted, err)
 	}
-	if retry, err := store.DeleteLakeObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if retry, err := store.DeleteLakeObject(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		lakePrivate.Bucket, lakePrivate.Key, time.Now()); err != nil || retry.State != ObjectStateDeleted {
 		t.Fatalf("retry lake delete = %#v, %v", retry, err)
 	}
-	if _, err := store.ReadLakeObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if _, err := store.ReadLakeObject(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		lakePrivate.Bucket, lakePrivate.Key); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("deleted lake read error = %v", err)
 	}
@@ -307,14 +307,14 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	createLakeObject := func(scope StorageScope, key string) GovernedObject {
 		t.Helper()
 		object, reserveErr := store.ReserveLakeObject(ctx, RegisterActiveObjectInput{
-			Tenant: "nimmly", Scope: scope, ArtifactClass: ArtifactDuckLakeData,
+			Tenant: "acme", Scope: scope, ArtifactClass: ArtifactDuckLakeData,
 			ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-			Bucket: "nimmly-files", Key: key,
+			Bucket: "acme-files", Key: key,
 		})
 		if reserveErr != nil {
 			t.Fatalf("reserve batch lake object %q: %v", key, reserveErr)
 		}
-		object, activateErr := store.ActivateLakeObject(ctx, "nimmly", object.ID)
+		object, activateErr := store.ActivateLakeObject(ctx, "acme", object.ID)
 		if activateErr != nil {
 			t.Fatalf("activate batch lake object %q: %v", key, activateErr)
 		}
@@ -324,29 +324,29 @@ func TestPostgresGovernedStoreEnforcesGrantRows(t *testing.T) {
 	workspaceBatchA := createLakeObject(WorkspaceStorageScope(workspaceA), "ducklake/main/private/batch-a.parquet")
 	workspaceBatchB := createLakeObject(WorkspaceStorageScope(workspaceB), "ducklake/main/private/batch-b.parquet")
 
-	if _, err := store.DeleteLakeObjects(ctx, "nimmly", TenantStorageScope(), "nimmly-files",
+	if _, err := store.DeleteLakeObjects(ctx, "acme", TenantStorageScope(), "acme-files",
 		[]string{lakePublic.Key, workspaceBatchA.Key}, time.Now()); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("mixed tenant/workspace batch delete error = %v", err)
 	}
-	if _, err := store.ReadLakeObject(ctx, "nimmly", TenantStorageScope(), lakePublic.Bucket,
+	if _, err := store.ReadLakeObject(ctx, "acme", TenantStorageScope(), lakePublic.Bucket,
 		lakePublic.Key); err != nil {
 		t.Fatalf("rejected mixed batch changed public row: %v", err)
 	}
-	if _, err := store.DeleteLakeObjects(ctx, "nimmly", WorkspaceStorageScope(workspaceA), "nimmly-files",
+	if _, err := store.DeleteLakeObjects(ctx, "acme", WorkspaceStorageScope(workspaceA), "acme-files",
 		[]string{workspaceBatchA.Key, workspaceBatchB.Key}, time.Now()); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("mixed workspace batch delete error = %v", err)
 	}
-	if _, err := store.ReadLakeObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA), workspaceBatchA.Bucket,
+	if _, err := store.ReadLakeObject(ctx, "acme", WorkspaceStorageScope(workspaceA), workspaceBatchA.Bucket,
 		workspaceBatchA.Key); err != nil {
 		t.Fatalf("rejected cross-workspace batch changed workspace A row: %v", err)
 	}
-	deletedBatch, err := store.DeleteLakeObjects(ctx, "nimmly", TenantStorageScope(), "nimmly-files",
+	deletedBatch, err := store.DeleteLakeObjects(ctx, "acme", TenantStorageScope(), "acme-files",
 		[]string{lakePublic.Key, publicBatchObject.Key}, time.Now())
 	if err != nil || len(deletedBatch) != 2 || deletedBatch[0].State != ObjectStateDeleted ||
 		deletedBatch[1].State != ObjectStateDeleted {
 		t.Fatalf("tenant-public batch delete = %#v, %v", deletedBatch, err)
 	}
-	if retryBatch, err := store.DeleteLakeObjects(ctx, "nimmly", TenantStorageScope(), "nimmly-files",
+	if retryBatch, err := store.DeleteLakeObjects(ctx, "acme", TenantStorageScope(), "acme-files",
 		[]string{lakePublic.Key, publicBatchObject.Key}, time.Now()); err != nil || len(retryBatch) != 2 {
 		t.Fatalf("tenant-public batch retry = %#v, %v", retryBatch, err)
 	}
@@ -379,10 +379,10 @@ func TestPostgresGovernedStoreReplaysReadOnlyGrantWithEmptyOutputClasses(t *test
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
-	object := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceA), "read-only.parquet")
+	object := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceA), "read-only.parquet")
 
 	clientExpiry := time.Now().Add(time.Hour).Truncate(time.Second).UTC().
 		Add(120 * time.Millisecond).Format("2006-01-02T15:04:05.000Z07:00")
@@ -391,7 +391,7 @@ func TestPostgresGovernedStoreReplaysReadOnlyGrantWithEmptyOutputClasses(t *test
 		t.Fatal(err)
 	}
 	grantInput := IssueGrantInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 		ExecutionID:       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 		ReadableObjectIDs: []string{object.ID}, IssuerServiceAccount: "transformation-storage-authority",
 		ExpiresAt: expiresAt, CleanupOwnerID: "22222222-2222-4222-8222-222222222222",
@@ -452,16 +452,16 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
 
-	active := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceA), "delete-active")
-	public := registerStoreObject(t, ctx, store, "nimmly", TenantStorageScope(), "delete-public")
+	active := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceA), "delete-active")
+	public := registerStoreObject(t, ctx, store, "acme", TenantStorageScope(), "delete-public")
 	reserved, err := store.ReserveObject(ctx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 		ArtifactClass: ArtifactTransformationSQL, ContentHash: testContentHash,
-		ByteSize: 12, MediaType: "text/sql", Bucket: "nimmly-files",
+		ByteSize: 12, MediaType: "text/sql", Bucket: "acme-files",
 		Key: governedReservationKey(WorkspaceStorageScope(workspaceA), ArtifactTransformationSQL,
 			"44444444-4444-4444-8444-444444444444"),
 		CleanupOwnerID: "22222222-2222-4222-8222-222222222222",
@@ -480,17 +480,17 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatalf("backfill legacy reserved staging key: %v", err)
 	}
-	if referenced, err := store.IsLiveObjectKeyReferenced(ctx, "nimmly", reserved.Bucket, reserved.Key); err != nil || !referenced {
+	if referenced, err := store.IsLiveObjectKeyReferenced(ctx, "acme", reserved.Bucket, reserved.Key); err != nil || !referenced {
 		t.Fatalf("reserved staging key reference = %t, %v", referenced, err)
 	}
 	workspaceStagingPrefix := governedStagingPrefix(WorkspaceStorageScope(workspaceA), ArtifactTransformationSQL)
-	if referenced, err := store.HasLiveObjectKeyUnderPrefix(ctx, "nimmly", reserved.Bucket,
+	if referenced, err := store.HasLiveObjectKeyUnderPrefix(ctx, "acme", reserved.Bucket,
 		workspaceStagingPrefix); err != nil || !referenced {
 		t.Fatalf("live staging prefix reference = %t, %v", referenced, err)
 	}
 
 	grantInput := IssueGrantInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 		ExecutionID:       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		ReadableObjectIDs: []string{active.ID}, IssuerServiceAccount: "transformation-storage-authority",
 		ExpiresAt:      time.Now().Add(time.Hour),
@@ -507,10 +507,10 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		scope    StorageScope
 		objectID string
 	}{
-		{"other tenant", "ambrovia", WorkspaceStorageScope(workspaceA), active.ID},
-		{"other workspace", "nimmly", WorkspaceStorageScope(workspaceB), active.ID},
-		{"workspace cannot delete public", "nimmly", WorkspaceStorageScope(workspaceA), public.ID},
-		{"tenant cannot delete workspace", "nimmly", TenantStorageScope(), active.ID},
+		{"other tenant", "atlas", WorkspaceStorageScope(workspaceA), active.ID},
+		{"other workspace", "acme", WorkspaceStorageScope(workspaceB), active.ID},
+		{"workspace cannot delete public", "acme", WorkspaceStorageScope(workspaceA), public.ID},
+		{"tenant cannot delete workspace", "acme", TenantStorageScope(), active.ID},
 	} {
 		t.Run(denied.name, func(t *testing.T) {
 			if _, err := store.TombstoneObject(ctx, denied.tenant, denied.scope, denied.objectID,
@@ -521,34 +521,34 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	}
 
 	firstRevocation := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
-	deleted, err := store.TombstoneObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA), active.ID,
+	deleted, err := store.TombstoneObject(ctx, "acme", WorkspaceStorageScope(workspaceA), active.ID,
 		firstRevocation)
 	if err != nil || deleted.Object.State != ObjectStateDeleted || !deleted.AccessRevokedAt.Equal(firstRevocation) {
 		t.Fatalf("active deletion = %#v, %v", deleted, err)
 	}
-	if retry, err := store.TombstoneObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA), active.ID,
+	if retry, err := store.TombstoneObject(ctx, "acme", WorkspaceStorageScope(workspaceA), active.ID,
 		firstRevocation.Add(time.Hour)); err != nil || !retry.AccessRevokedAt.Equal(firstRevocation) {
 		t.Fatalf("idempotent deletion = %#v, %v", retry, err)
 	}
-	if _, err := store.ActivateObject(ctx, "nimmly", active.ID, active.Bucket, active.Key); !errors.Is(err, ErrGovernedDenied) {
+	if _, err := store.ActivateObject(ctx, "acme", active.ID, active.Bucket, active.Key); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("reactivate deleted object error = %v", err)
 	}
-	if _, err := store.AuthorizeObjectReservation(ctx, "nimmly", active.ID); !errors.Is(err, ErrGovernedDenied) {
+	if _, err := store.AuthorizeObjectReservation(ctx, "acme", active.ID); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("authorize deleted object error = %v", err)
 	}
 	sweptAt := firstRevocation.Add(10 * time.Minute)
-	swept, err := store.RecordLegacyStagingSweep(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	swept, err := store.RecordLegacyStagingSweep(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		active.ID, sweptAt)
 	if err != nil || swept.LegacyStagingSweptAt == nil || !swept.LegacyStagingSweptAt.Equal(sweptAt) {
 		t.Fatalf("record legacy staging sweep = %#v, %v", swept, err)
 	}
-	if retry, err := store.RecordLegacyStagingSweep(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if retry, err := store.RecordLegacyStagingSweep(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		active.ID, sweptAt.Add(time.Hour)); err != nil || retry.LegacyStagingSweptAt == nil ||
 		!retry.LegacyStagingSweptAt.Equal(sweptAt) {
 		t.Fatalf("idempotent legacy staging sweep = %#v, %v", retry, err)
 	}
 	if _, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ObjectID: active.ID, Now: time.Now(),
 	}); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("consume tombstoned object error = %v", err)
@@ -558,57 +558,57 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		t.Fatalf("issue grant for tombstoned object error = %v", err)
 	}
 
-	reservedDeletion, err := store.TombstoneObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	reservedDeletion, err := store.TombstoneObject(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		reserved.ID, firstRevocation)
 	if err != nil || reservedDeletion.StagingKey != reserved.Key {
 		t.Fatalf("reserved deletion = %#v, %v", reservedDeletion, err)
 	}
-	if referenced, err := store.IsLiveObjectKeyReferenced(ctx, "nimmly", reserved.Bucket, reserved.Key); err != nil || referenced {
+	if referenced, err := store.IsLiveObjectKeyReferenced(ctx, "acme", reserved.Bucket, reserved.Key); err != nil || referenced {
 		t.Fatalf("deleted staging key reference = %t, %v", referenced, err)
 	}
-	if referenced, err := store.HasLiveObjectKeyUnderPrefix(ctx, "nimmly", reserved.Bucket,
+	if referenced, err := store.HasLiveObjectKeyUnderPrefix(ctx, "acme", reserved.Bucket,
 		workspaceStagingPrefix); err != nil || referenced {
 		t.Fatalf("deleted staging prefix reference = %t, %v", referenced, err)
 	}
-	if referenced, err := store.IsLiveObjectKeyReferenced(ctx, "ambrovia", public.Bucket, public.Key); err != nil || referenced {
+	if referenced, err := store.IsLiveObjectKeyReferenced(ctx, "atlas", public.Bucket, public.Key); err != nil || referenced {
 		t.Fatalf("cross-tenant live-key reference = %t, %v", referenced, err)
 	}
-	if _, err := store.ActivateObject(ctx, "nimmly", reserved.ID, reserved.Bucket,
+	if _, err := store.ActivateObject(ctx, "acme", reserved.ID, reserved.Bucket,
 		governedObjectKey(reserved.Scope, reserved.ArtifactClass, reserved.ContentHash, reserved.ID)); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("activate tombstoned reservation error = %v", err)
 	}
 
 	confirmedAt := firstRevocation.Add(time.Hour)
-	if _, err := store.ConfirmObjectRemoval(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if _, err := store.ConfirmObjectRemoval(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		active.ID, confirmedAt); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("legacy object with unknown staging locator was confirmed: %v", err)
 	}
-	confirmed, err := store.ConfirmObjectRemoval(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	confirmed, err := store.ConfirmObjectRemoval(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		reserved.ID, confirmedAt)
 	if err != nil || confirmed.PhysicalRemovalConfirmedAt == nil ||
 		!confirmed.PhysicalRemovalConfirmedAt.Equal(confirmedAt) {
 		t.Fatalf("confirm deletion = %#v, %v", confirmed, err)
 	}
-	if retry, err := store.ConfirmObjectRemoval(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if retry, err := store.ConfirmObjectRemoval(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		reserved.ID, confirmedAt.Add(time.Hour)); err != nil || retry.PhysicalRemovalConfirmedAt == nil ||
 		!retry.PhysicalRemovalConfirmedAt.Equal(confirmedAt) {
 		t.Fatalf("idempotent confirmation = %#v, %v", retry, err)
 	}
 
 	lake, err := store.ReserveLakeObject(ctx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactDuckLakeData,
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactDuckLakeData,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-		Bucket: "nimmly-files", Key: "ducklake/delete-contract.parquet",
+		Bucket: "acme-files", Key: "ducklake/delete-contract.parquet",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.TombstoneObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA), lake.ID,
+	if _, err := store.TombstoneObject(ctx, "acme", WorkspaceStorageScope(workspaceA), lake.ID,
 		firstRevocation); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("ordinary delete accepted DuckLake object: %v", err)
 	}
 
-	deployedLockKey := "nimmly\nnimmly-files\nducklake/delete-contract.parquet"
+	deployedLockKey := "acme\nacme-files\nducklake/delete-contract.parquet"
 	for name, lockKey := range map[string]string{
 		"deployed":     deployedLockKey,
 		"intermediate": "lake\n" + deployedLockKey,
@@ -626,7 +626,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 			lakeLockAcquired := make(chan func(), 1)
 			lakeLockErr := make(chan error, 1)
 			go func() {
-				release, lockError := store.AcquireLakePathLock(ctx, "nimmly", "nimmly-files",
+				release, lockError := store.AcquireLakePathLock(ctx, "acme", "acme-files",
 					"ducklake/delete-contract.parquet")
 				if lockError != nil {
 					lakeLockErr <- lockError
@@ -667,8 +667,8 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, deployedObjectLockKey := range []string{"object\nnimmly\n" + public.ID,
-		objectLockKey("nimmly", public.ID)} {
+	for _, deployedObjectLockKey := range []string{"object\nacme\n" + public.ID,
+		objectLockKey("acme", public.ID)} {
 		if _, err := deployedObjectLockConn.ExecContext(ctx,
 			`SELECT pg_advisory_lock(hashtextextended($1, 0))`, deployedObjectLockKey); err != nil {
 			_ = deployedObjectLockConn.Close()
@@ -678,7 +678,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	objectLockAcquired := make(chan func(), 1)
 	objectLockErr := make(chan error, 1)
 	go func() {
-		release, lockError := store.AcquireObjectLock(ctx, "nimmly", public.ID)
+		release, lockError := store.AcquireObjectLock(ctx, "acme", public.ID)
 		if lockError != nil {
 			objectLockErr <- lockError
 			return
@@ -707,12 +707,12 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		t.Fatal("compatible object lock was not released")
 	}
 
-	physicalBarrierCollision, err := store.AcquirePhysicalKeyLock(ctx, "registration", "nimmly", "nimmly-files")
+	physicalBarrierCollision, err := store.AcquirePhysicalKeyLock(ctx, "registration", "acme", "acme-files")
 	if err != nil {
 		t.Fatal(err)
 	}
 	barrierCtx, cancelBarrier := context.WithTimeout(ctx, time.Second)
-	nonCollidingBarrier, err := store.AcquireRegistrationBarrier(barrierCtx, "nimmly", "nimmly-files")
+	nonCollidingBarrier, err := store.AcquireRegistrationBarrier(barrierCtx, "acme", "acme-files")
 	cancelBarrier()
 	physicalBarrierCollision()
 	if err != nil {
@@ -721,12 +721,12 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	nonCollidingBarrier()
 
 	// Physical paths must not collide with the internal object-lock key.
-	physicalObjectCollision, err := store.AcquirePhysicalKeyLock(ctx, "object-other", "nimmly", public.ID)
+	physicalObjectCollision, err := store.AcquirePhysicalKeyLock(ctx, "object-other", "acme", public.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	objectCtx, cancelObject := context.WithTimeout(ctx, time.Second)
-	nonCollidingObject, err := store.AcquireObjectLock(objectCtx, "nimmly", public.ID)
+	nonCollidingObject, err := store.AcquireObjectLock(objectCtx, "acme", public.ID)
 	cancelObject()
 	physicalObjectCollision()
 	if err != nil {
@@ -734,19 +734,19 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	}
 	nonCollidingObject()
 
-	registrationBarrier, err := store.AcquireRegistrationBarrier(ctx, "nimmly", "nimmly-files")
+	registrationBarrier, err := store.AcquireRegistrationBarrier(ctx, "acme", "acme-files")
 	if err != nil {
 		t.Fatal(err)
 	}
 	registrationKey := "governed-staging/workspace/" + workspaceA + "/transformation_sql/concurrent"
-	if release, err := store.AcquireRegisterExistingLock(ctx, "nimmly", "nimmly-files",
+	if release, err := store.AcquireRegisterExistingLock(ctx, "acme", "acme-files",
 		registrationKey); !errors.Is(err, ErrGovernedConflict) {
 		if release != nil {
 			release()
 		}
 		t.Fatalf("register-existing during cleanup error = %v, want conflict", err)
 	}
-	if release, err := store.AcquireRegisterExistingLock(ctx, "ambrovia", "nimmly-files",
+	if release, err := store.AcquireRegisterExistingLock(ctx, "atlas", "acme-files",
 		registrationKey+"-other-tenant"); !errors.Is(err, ErrGovernedConflict) {
 		if release != nil {
 			release()
@@ -756,7 +756,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	lakeRegistrationAcquired := make(chan func(), 1)
 	lakeRegistrationErr := make(chan error, 1)
 	go func() {
-		release, lockError := store.AcquireLakeRegistrationLock(ctx, "nimmly", "nimmly-files",
+		release, lockError := store.AcquireLakeRegistrationLock(ctx, "acme", "acme-files",
 			"ducklake/concurrent-registration.parquet")
 		if lockError != nil {
 			lakeRegistrationErr <- lockError
@@ -783,40 +783,40 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Lake PUT registration lock was not released after cleanup barrier")
 	}
-	oldAmbroviaLakeLock, err := store.AcquireLakePathLock(ctx, "ambrovia", "nimmly-files",
+	oldAtlasLakeLock, err := store.AcquireLakePathLock(ctx, "atlas", "acme-files",
 		"ducklake/lock-order.parquet")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ambroviaLakeRegistrationAcquired := make(chan func(), 1)
-	ambroviaLakeRegistrationErr := make(chan error, 1)
+	atlasLakeRegistrationAcquired := make(chan func(), 1)
+	atlasLakeRegistrationErr := make(chan error, 1)
 	go func() {
-		release, lockError := store.AcquireLakeRegistrationLock(ctx, "ambrovia", "nimmly-files",
+		release, lockError := store.AcquireLakeRegistrationLock(ctx, "atlas", "acme-files",
 			"ducklake/lock-order.parquet")
 		if lockError != nil {
-			ambroviaLakeRegistrationErr <- lockError
+			atlasLakeRegistrationErr <- lockError
 			return
 		}
-		ambroviaLakeRegistrationAcquired <- release
+		atlasLakeRegistrationAcquired <- release
 	}()
 	// The new Lake registration must acquire the (shared) bucket barrier before
 	// waiting on the deployed path lock, regardless of how the tenant name sorts.
 	time.Sleep(100 * time.Millisecond)
 	if cleanupCouldStart := tryExclusiveAdvisoryLock(t, ctx, db,
-		registrationBarrierKey("nimmly-files")); cleanupCouldStart {
-		oldAmbroviaLakeLock()
+		registrationBarrierKey("acme-files")); cleanupCouldStart {
+		oldAtlasLakeLock()
 		t.Fatal("registration/path lock order is inconsistent: barrier not held while waiting on path")
 	}
-	oldAmbroviaLakeLock()
+	oldAtlasLakeLock()
 	select {
-	case release := <-ambroviaLakeRegistrationAcquired:
+	case release := <-atlasLakeRegistrationAcquired:
 		release()
-	case err := <-ambroviaLakeRegistrationErr:
+	case err := <-atlasLakeRegistrationErr:
 		t.Fatalf("ordered Lake registration lock failed after path release: %v", err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("ordered Lake registration lock did not finish after path release")
 	}
-	releaseRegistration, err := store.AcquireRegisterExistingLock(ctx, "nimmly", "nimmly-files",
+	releaseRegistration, err := store.AcquireRegisterExistingLock(ctx, "acme", "acme-files",
 		registrationKey)
 	if err != nil {
 		t.Fatalf("register-existing lock failed after barrier release: %v", err)
@@ -824,14 +824,14 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	// Registrations share the bucket barrier: the immutable owner row, not
 	// mutual exclusion, decides ownership, so same-bucket registrations of
 	// different keys proceed concurrently. Only cleanup excludes them.
-	releaseSameBucketRegistration, err := store.AcquireRegisterExistingLock(ctx, "nimmly", "nimmly-files",
+	releaseSameBucketRegistration, err := store.AcquireRegisterExistingLock(ctx, "acme", "acme-files",
 		registrationKey+"-other")
 	if err != nil {
 		releaseRegistration()
 		t.Fatalf("same-bucket concurrent registration lock failed: %v", err)
 	}
 	sameKeyCtx, cancelSameKey := context.WithTimeout(ctx, 150*time.Millisecond)
-	release, err := store.AcquireRegisterExistingLock(sameKeyCtx, "nimmly", "nimmly-files", registrationKey)
+	release, err := store.AcquireRegisterExistingLock(sameKeyCtx, "acme", "acme-files", registrationKey)
 	cancelSameKey()
 	if !errors.Is(err, context.DeadlineExceeded) {
 		if release != nil {
@@ -841,7 +841,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		releaseRegistration()
 		t.Fatalf("same-key concurrent registration did not wait on the physical key: %v", err)
 	}
-	releaseOtherBucketRegistration, err := store.AcquireRegisterExistingLock(ctx, "nimmly", "other-files",
+	releaseOtherBucketRegistration, err := store.AcquireRegisterExistingLock(ctx, "acme", "other-files",
 		registrationKey+"-other-bucket")
 	if err != nil {
 		releaseSameBucketRegistration()
@@ -855,7 +855,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	cleanupBarrierAcquired := make(chan func(), 1)
 	cleanupBarrierErr := make(chan error, 1)
 	go func() {
-		release, lockError := store.AcquireRegistrationBarrier(ctx, "nimmly", "nimmly-files")
+		release, lockError := store.AcquireRegistrationBarrier(ctx, "acme", "acme-files")
 		if lockError != nil {
 			cleanupBarrierErr <- lockError
 			return
@@ -888,10 +888,10 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	// A real reservation by another tenant in this bucket holds the shared barrier
 	// for its transaction; bucket cleanup must wait for it to finish. It rolls
 	// back so the bucket's persisted history stays exclusive for later checks.
-	releaseReservation, reservationDone := holdReservationThenRollBack(t, ctx, store, "ambrovia", "nimmly-files")
+	releaseReservation, reservationDone := holdReservationThenRollBack(t, ctx, store, "atlas", "acme-files")
 	reservationCleanupAcquired := make(chan func(), 1)
 	go func() {
-		release, lockError := store.AcquireRegistrationBarrier(ctx, "nimmly", "nimmly-files")
+		release, lockError := store.AcquireRegistrationBarrier(ctx, "acme", "acme-files")
 		if lockError != nil {
 			cleanupBarrierErr <- lockError
 			return
@@ -921,14 +921,14 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		t.Fatal("cleanup barrier was not released after reservation completed")
 	}
 
-	unlock, err := store.AcquireObjectLock(ctx, "nimmly", public.ID)
+	unlock, err := store.AcquireObjectLock(ctx, "acme", public.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	acquired := make(chan func(), 1)
 	lockErr := make(chan error, 1)
 	go func() {
-		release, lockError := store.AcquireObjectLock(ctx, "nimmly", public.ID)
+		release, lockError := store.AcquireObjectLock(ctx, "acme", public.ID)
 		if lockError != nil {
 			lockErr <- lockError
 			return
@@ -972,7 +972,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		}
 	}()
 	for _, objectID := range []string{active.ID, public.ID, reserved.ID} {
-		release, lockError := limitedStore.AcquireObjectLock(ctx, "nimmly", objectID)
+		release, lockError := limitedStore.AcquireObjectLock(ctx, "acme", objectID)
 		if lockError != nil {
 			t.Fatalf("acquire distinct object lock: %v", lockError)
 		}
@@ -985,7 +985,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 	}
 	fourthAcquired := make(chan func(), 1)
 	go func() {
-		release, lockError := limitedStore.AcquireObjectLock(ctx, "nimmly", lake.ID)
+		release, lockError := limitedStore.AcquireObjectLock(ctx, "acme", lake.ID)
 		if lockError != nil {
 			lockErr <- lockError
 			return
@@ -1015,40 +1015,40 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		manyBuckets = append(manyBuckets, fmt.Sprintf("historical-bucket-%02d", index))
 	}
 	manyBarrierCtx, cancelManyBarriers := context.WithTimeout(ctx, time.Second)
-	manyBarriersRelease, err := limitedStore.AcquireRegistrationBarriers(manyBarrierCtx, "nimmly", manyBuckets)
+	manyBarriersRelease, err := limitedStore.AcquireRegistrationBarriers(manyBarrierCtx, "acme", manyBuckets)
 	cancelManyBarriers()
 	if err != nil {
 		t.Fatalf("acquire many registration barriers in one mutation slot: %v", err)
 	}
 	manyBarriersRelease()
 
-	if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "nimmly", "nimmly-files"); err != nil || !exclusive {
+	if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "acme", "acme-files"); err != nil || !exclusive {
 		t.Fatalf("tenant-only persisted bucket history = %t, %v", exclusive, err)
 	}
 	var ownerVersionBefore string
 	if err := db.QueryRowContext(ctx, `SELECT xmin::text FROM "`+schema+`".storage_bucket_owners
-		WHERE physical_bucket = 'nimmly-files'`).Scan(&ownerVersionBefore); err != nil {
+		WHERE physical_bucket = 'acme-files'`).Scan(&ownerVersionBefore); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatalf("idempotent bucket ownership claim: %v", err)
 	}
 	var ownerVersionAfter string
 	if err := db.QueryRowContext(ctx, `SELECT xmin::text FROM "`+schema+`".storage_bucket_owners
-		WHERE physical_bucket = 'nimmly-files'`).Scan(&ownerVersionAfter); err != nil {
+		WHERE physical_bucket = 'acme-files'`).Scan(&ownerVersionAfter); err != nil {
 		t.Fatal(err)
 	}
 	if ownerVersionAfter != ownerVersionBefore {
 		t.Fatalf("idempotent bucket ownership claim rewrote the owner row: %s -> %s",
 			ownerVersionBefore, ownerVersionAfter)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "ambrovia", "nimmly-files"); !errors.Is(err, ErrGovernedConflict) {
+	if err := store.ClaimBucketOwnership(ctx, "atlas", "acme-files"); !errors.Is(err, ErrGovernedConflict) {
 		t.Fatalf("conflicting bucket ownership claim = %v, want conflict", err)
 	}
 	historical, err := store.RegisterActiveObject(ctx, RegisterActiveObjectInput{
-		Tenant: "ambrovia", Scope: TenantStorageScope(), ArtifactClass: ArtifactWorkBundle,
+		Tenant: "atlas", Scope: TenantStorageScope(), ArtifactClass: ArtifactWorkBundle,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-		Bucket: "nimmly-files", Key: "governed/test/historical-other-tenant",
+		Bucket: "acme-files", Key: "governed/test/historical-other-tenant",
 	})
 	if err != nil {
 		t.Fatalf("seed historically shared bucket: %v", err)
@@ -1059,7 +1059,7 @@ func TestPostgresGovernedStoreDeletesExactOrdinaryObjectScope(t *testing.T) {
 		registeredStaging.String != historical.Key {
 		t.Fatalf("register-existing staging locator = %#v, %v", registeredStaging, err)
 	}
-	if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "nimmly", "nimmly-files"); err != nil || exclusive {
+	if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "acme", "acme-files"); err != nil || exclusive {
 		t.Fatalf("historically shared persisted bucket history = %t, %v", exclusive, err)
 	}
 }
@@ -1091,16 +1091,16 @@ func TestPostgresGovernedStoreCleansExactReservationScope(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
 
 	reserve := func(scope StorageScope, artifactClass ArtifactClass, suffix string) GovernedObject {
 		t.Helper()
 		object, err := store.ReserveObject(ctx, RegisterActiveObjectInput{
-			Tenant: "nimmly", Scope: scope, ArtifactClass: artifactClass,
+			Tenant: "acme", Scope: scope, ArtifactClass: artifactClass,
 			ContentHash: testContentHash, ByteSize: 12, MediaType: "application/json",
-			Bucket: "nimmly-files", Key: governedReservationKey(scope, artifactClass, suffix),
+			Bucket: "acme-files", Key: governedReservationKey(scope, artifactClass, suffix),
 			CleanupOwnerID: "22222222-2222-4222-8222-222222222222",
 		}, nil)
 		if err != nil {
@@ -1116,14 +1116,14 @@ func TestPostgresGovernedStoreCleansExactReservationScope(t *testing.T) {
 		"55555555-5555-4555-8555-555555555555")
 	activeAnalysis := reserve(WorkspaceStorageScope(workspaceA), ArtifactAnalysisResult,
 		"66666666-6666-4666-8666-666666666666")
-	activeAnalysis, err = store.ActivateObject(ctx, "nimmly", activeAnalysis.ID,
+	activeAnalysis, err = store.ActivateObject(ctx, "acme", activeAnalysis.ID,
 		activeAnalysis.Bucket, governedObjectKey(activeAnalysis.Scope, activeAnalysis.ArtifactClass,
 			activeAnalysis.ContentHash, activeAnalysis.ID))
 	if err != nil {
 		t.Fatalf("commit analysis result: %v", err)
 	}
 	analysisGrant, err := store.IssueGrant(ctx, IssueGrantInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 		ExecutionID:          "77777777-7777-4777-8777-777777777777",
 		ReadableObjectIDs:    []string{activeAnalysis.ID},
 		IssuerServiceAccount: "transformation-storage-authority",
@@ -1134,85 +1134,85 @@ func TestPostgresGovernedStoreCleansExactReservationScope(t *testing.T) {
 		t.Fatalf("grant analysis result read: %v", err)
 	}
 	readAnalysis, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "nimmly", GrantID: analysisGrant.ID, ExecutionID: analysisGrant.ExecutionID,
+		Tenant: "acme", GrantID: analysisGrant.ID, ExecutionID: analysisGrant.ExecutionID,
 		ObjectID: activeAnalysis.ID, Now: time.Now(),
 	})
 	if err != nil || readAnalysis.ID != activeAnalysis.ID {
 		t.Fatalf("read analysis result = %#v, %v", readAnalysis, err)
 	}
-	active := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceA),
+	active := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceA),
 		"reservation-cleanup-active")
 	revokedAt := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
 
-	if err := store.TombstoneReservations(ctx, "nimmly", WorkspaceStorageScope(workspaceB), revokedAt); err != nil {
+	if err := store.TombstoneReservations(ctx, "acme", WorkspaceStorageScope(workspaceB), revokedAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AuthorizeObjectReservation(ctx, "nimmly", workspaceAReservation.ID); err != nil {
+	if _, err := store.AuthorizeObjectReservation(ctx, "acme", workspaceAReservation.ID); err != nil {
 		t.Fatalf("other-workspace cleanup changed workspace A reservation: %v", err)
 	}
-	workspaceBPending, err := store.PendingReservationDeletions(ctx, "nimmly",
+	workspaceBPending, err := store.PendingReservationDeletions(ctx, "acme",
 		WorkspaceStorageScope(workspaceB), 64)
 	if err != nil || len(workspaceBPending) != 1 || workspaceBPending[0].Object.ID != workspaceBReservation.ID {
 		t.Fatalf("workspace B pending cleanup = %#v, %v", workspaceBPending, err)
 	}
 
-	if err := store.TombstoneReservations(ctx, "nimmly", WorkspaceStorageScope(workspaceA), revokedAt); err != nil {
+	if err := store.TombstoneReservations(ctx, "acme", WorkspaceStorageScope(workspaceA), revokedAt); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := store.PendingReservationDeletions(ctx, "nimmly", WorkspaceStorageScope(workspaceA), 64)
+	pending, err := store.PendingReservationDeletions(ctx, "acme", WorkspaceStorageScope(workspaceA), 64)
 	if err != nil || len(pending) != 2 || !pending[0].AccessRevokedAt.Equal(revokedAt) {
 		t.Fatalf("workspace A pending cleanup = %#v, %v", pending, err)
 	}
 	firstPending := pending[0].Object.ID
-	if err := store.RecordReservationCleanupAttempt(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if err := store.RecordReservationCleanupAttempt(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		firstPending, revokedAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	rotated, err := store.PendingReservationDeletions(ctx, "nimmly", WorkspaceStorageScope(workspaceA), 1)
+	rotated, err := store.PendingReservationDeletions(ctx, "acme", WorkspaceStorageScope(workspaceA), 1)
 	if err != nil || len(rotated) != 1 || rotated[0].Object.ID == firstPending {
 		t.Fatalf("reservation cleanup did not rotate past attempted row: %#v, %v", rotated, err)
 	}
-	if _, err := store.ActivateObject(ctx, "nimmly", workspaceAReservation.ID,
+	if _, err := store.ActivateObject(ctx, "acme", workspaceAReservation.ID,
 		workspaceAReservation.Bucket, governedObjectKey(workspaceAReservation.Scope,
 			workspaceAReservation.ArtifactClass, workspaceAReservation.ContentHash,
 			workspaceAReservation.ID)); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("late commit after reservation cleanup = %v, want denied", err)
 	}
-	if _, err := store.TombstoneObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA), active.ID,
+	if _, err := store.TombstoneObject(ctx, "acme", WorkspaceStorageScope(workspaceA), active.ID,
 		revokedAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.TombstoneObject(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if _, err := store.TombstoneObject(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		activeAnalysis.ID, revokedAt); err != nil {
 		t.Fatalf("delete analysis result: %v", err)
 	}
 	if _, err := store.ConsumeGrantObject(ctx, ConsumeGrantObjectInput{
-		Tenant: "nimmly", GrantID: analysisGrant.ID, ExecutionID: analysisGrant.ExecutionID,
+		Tenant: "acme", GrantID: analysisGrant.ID, ExecutionID: analysisGrant.ExecutionID,
 		ObjectID: activeAnalysis.ID, Now: time.Now(),
 	}); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("read deleted analysis result = %v, want denied", err)
 	}
-	pending, err = store.PendingReservationDeletions(ctx, "nimmly", WorkspaceStorageScope(workspaceA), 64)
+	pending, err = store.PendingReservationDeletions(ctx, "acme", WorkspaceStorageScope(workspaceA), 64)
 	if err != nil || len(pending) != 2 {
 		t.Fatalf("active deletion leaked into reservation cleanup = %#v, %v", pending, err)
 	}
 	confirmedAt := revokedAt.Add(10 * time.Minute)
 	for _, reservation := range []GovernedObject{workspaceAReservation, workspaceAReservation2} {
-		if _, err := store.ConfirmObjectRemoval(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+		if _, err := store.ConfirmObjectRemoval(ctx, "acme", WorkspaceStorageScope(workspaceA),
 			reservation.ID, confirmedAt); err != nil {
 			t.Fatal(err)
 		}
 	}
-	count, oldest, err := store.ReservationCleanupStatus(ctx, "nimmly",
+	count, oldest, err := store.ReservationCleanupStatus(ctx, "acme",
 		WorkspaceStorageScope(workspaceA))
 	if err != nil || count != 0 || oldest != nil {
 		t.Fatalf("completed cleanup status = %d, %v, %v", count, oldest, err)
 	}
-	if err := store.TombstoneReservations(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if err := store.TombstoneReservations(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		revokedAt.Add(time.Hour)); err != nil {
 		t.Fatalf("idempotent cleanup retry: %v", err)
 	}
-	if object, err := store.AuthorizeObjectReservation(ctx, "nimmly", workspaceBReservation.ID); !errors.Is(err, ErrGovernedDenied) || object.ID != "" {
+	if object, err := store.AuthorizeObjectReservation(ctx, "acme", workspaceBReservation.ID); !errors.Is(err, ErrGovernedDenied) || object.ID != "" {
 		t.Fatalf("workspace B tombstone was not durable: %#v, %v", object, err)
 	}
 }
@@ -1240,16 +1240,16 @@ func TestPostgresGovernedStoreCleanupOwnerInheritanceAndGrantRevocation(t *testi
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
 	ownerA := "22222222-2222-4222-8222-222222222222"
 	ownerB := "33333333-3333-4333-8333-333333333333"
 	reserve := func(owner, suffix string) GovernedObject {
 		object, err := store.ReserveObject(ctx, RegisterActiveObjectInput{
-			Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+			Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 			ArtifactClass: ArtifactAnalysisResult, ContentHash: testContentHash,
-			ByteSize: 12, MediaType: "application/json", Bucket: "nimmly-files",
+			ByteSize: 12, MediaType: "application/json", Bucket: "acme-files",
 			Key:            governedReservationKey(WorkspaceStorageScope(workspaceA), ArtifactAnalysisResult, suffix),
 			CleanupOwnerID: owner,
 		}, nil)
@@ -1259,18 +1259,18 @@ func TestPostgresGovernedStoreCleanupOwnerInheritanceAndGrantRevocation(t *testi
 		return object
 	}
 	ownedActive := reserve(ownerA, "44444444-4444-4444-8444-444444444444")
-	if _, err := store.ActivateObject(ctx, "nimmly", ownedActive.ID, ownedActive.Bucket,
+	if _, err := store.ActivateObject(ctx, "acme", ownedActive.ID, ownedActive.Bucket,
 		governedObjectKey(ownedActive.Scope, ownedActive.ArtifactClass, ownedActive.ContentHash,
 			ownedActive.ID)); err != nil {
 		t.Fatal(err)
 	}
 	otherOwner := reserve(ownerB, "55555555-5555-4555-8555-555555555555")
-	legacy := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceA), "legacy-owner-null")
+	legacy := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceA), "legacy-owner-null")
 	reserveLake := func(scope StorageScope, key string) GovernedObject {
 		object, err := store.ReserveLakeObject(ctx, RegisterActiveObjectInput{
-			Tenant: "nimmly", Scope: scope, ArtifactClass: ArtifactDuckLakeData,
+			Tenant: "acme", Scope: scope, ArtifactClass: ArtifactDuckLakeData,
 			ContentHash: testContentHash, ByteSize: 12, MediaType: "application/parquet",
-			Bucket: "nimmly-files", Key: key,
+			Bucket: "acme-files", Key: key,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1279,24 +1279,24 @@ func TestPostgresGovernedStoreCleanupOwnerInheritanceAndGrantRevocation(t *testi
 	}
 	lakeReserved := reserveLake(WorkspaceStorageScope(workspaceA), "ducklake/owner/reserved.parquet")
 	lakeActive := reserveLake(WorkspaceStorageScope(workspaceA), "ducklake/owner/active.parquet")
-	if _, err := store.ActivateLakeObject(ctx, "nimmly", lakeActive.ID); err != nil {
+	if _, err := store.ActivateLakeObject(ctx, "acme", lakeActive.ID); err != nil {
 		t.Fatal(err)
 	}
 	lakeOtherWorkspace := reserveLake(WorkspaceStorageScope(workspaceB), "ducklake/owner/other.parquet")
-	if _, err := store.ActivateLakeObject(ctx, "nimmly", lakeOtherWorkspace.ID); err != nil {
+	if _, err := store.ActivateLakeObject(ctx, "acme", lakeOtherWorkspace.ID); err != nil {
 		t.Fatal(err)
 	}
-	pageOne, more, err := store.InventoryLakeObjects(ctx, "nimmly", WorkspaceStorageScope(workspaceA), "", 1)
+	pageOne, more, err := store.InventoryLakeObjects(ctx, "acme", WorkspaceStorageScope(workspaceA), "", 1)
 	if err != nil || len(pageOne) != 1 || !more {
 		t.Fatalf("lake inventory first page = %#v, %t, %v", pageOne, more, err)
 	}
-	pageTwo, more, err := store.InventoryLakeObjects(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	pageTwo, more, err := store.InventoryLakeObjects(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		pageOne[0].ID, 1)
 	if err != nil || len(pageTwo) != 1 || more {
 		t.Fatalf("lake inventory second page = %#v, %t, %v", pageTwo, more, err)
 	}
 	grant, err := store.IssueGrant(ctx, IssueGrantInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 		ExecutionID:       "66666666-6666-4666-8666-666666666666",
 		ReadableObjectIDs: []string{legacy.ID}, WritableArtifactClasses: []ArtifactClass{ArtifactSandboxRelation},
 		IssuerServiceAccount: "transformation-storage-authority", ExpiresAt: time.Now().Add(time.Hour),
@@ -1306,9 +1306,9 @@ func TestPostgresGovernedStoreCleanupOwnerInheritanceAndGrantRevocation(t *testi
 		t.Fatal(err)
 	}
 	output, err := store.ReserveGrantOutput(ctx, ReserveGrantOutputInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ArtifactClass: ArtifactSandboxRelation, ContentHash: testContentHash, ByteSize: 12,
-		MediaType: "application/parquet", Bucket: "nimmly-files", Now: time.Now(),
+		MediaType: "application/parquet", Bucket: "acme-files", Now: time.Now(),
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1319,27 +1319,27 @@ func TestPostgresGovernedStoreCleanupOwnerInheritanceAndGrantRevocation(t *testi
 		t.Fatalf("output cleanup owner = %q, %v", outputOwner, err)
 	}
 	revokedAt := time.Now().UTC()
-	if err := store.TombstoneOrdinaryObjects(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if err := store.TombstoneOrdinaryObjects(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		ownerA, false, revokedAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.ReserveGrantOutput(ctx, ReserveGrantOutputInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ArtifactClass: ArtifactSandboxRelation, ContentHash: testContentHash, ByteSize: 12,
-		MediaType: "application/parquet", Bucket: "nimmly-files", Now: time.Now(),
+		MediaType: "application/parquet", Bucket: "acme-files", Now: time.Now(),
 	}, nil); !errors.Is(err, ErrGovernedDenied) {
 		t.Fatalf("revoked grant output reservation error = %v", err)
 	}
-	deletions, err := store.PendingOrdinaryObjectDeletions(ctx, "nimmly",
+	deletions, err := store.PendingOrdinaryObjectDeletions(ctx, "acme",
 		WorkspaceStorageScope(workspaceA), ownerA, false, 10)
 	if err != nil || len(deletions) != 2 {
 		t.Fatalf("owner pending deletions = %d, %v", len(deletions), err)
 	}
-	if object, err := store.AuthorizeObjectReservation(ctx, "nimmly", otherOwner.ID); err != nil ||
+	if object, err := store.AuthorizeObjectReservation(ctx, "acme", otherOwner.ID); err != nil ||
 		object.State != ObjectStateReserved {
 		t.Fatalf("other owner changed = %#v, %v", object, err)
 	}
-	if err := store.TombstoneOrdinaryObjects(ctx, "nimmly", WorkspaceStorageScope(workspaceA),
+	if err := store.TombstoneOrdinaryObjects(ctx, "acme", WorkspaceStorageScope(workspaceA),
 		"", true, revokedAt.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -1385,7 +1385,7 @@ func TestPostgresGovernedStoreCleanupSelectorsMatchExactScope(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
 	owner := "22222222-2222-4222-8222-222222222222"
@@ -1393,9 +1393,9 @@ func TestPostgresGovernedStoreCleanupSelectorsMatchExactScope(t *testing.T) {
 	workspaceScope := WorkspaceStorageScope(workspaceA)
 	reserve := func(scope StorageScope, suffix string) GovernedObject {
 		object, err := store.ReserveObject(ctx, RegisterActiveObjectInput{
-			Tenant: "nimmly", Scope: scope, ArtifactClass: ArtifactAnalysisResult,
+			Tenant: "acme", Scope: scope, ArtifactClass: ArtifactAnalysisResult,
 			ContentHash: testContentHash, ByteSize: 12, MediaType: "application/json",
-			Bucket: "nimmly-files", Key: governedReservationKey(scope, ArtifactAnalysisResult, suffix),
+			Bucket: "acme-files", Key: governedReservationKey(scope, ArtifactAnalysisResult, suffix),
 			CleanupOwnerID: owner,
 		}, nil)
 		if err != nil {
@@ -1421,7 +1421,7 @@ func TestPostgresGovernedStoreCleanupSelectorsMatchExactScope(t *testing.T) {
 	}
 	issue := func(scope StorageScope, executionID, readableID string) ExecutionGrant {
 		grant, err := store.IssueGrant(ctx, IssueGrantInput{
-			Tenant: "nimmly", Scope: scope, ExecutionID: executionID, ReadableObjectIDs: []string{readableID},
+			Tenant: "acme", Scope: scope, ExecutionID: executionID, ReadableObjectIDs: []string{readableID},
 			WritableArtifactClasses: []ArtifactClass{ArtifactSandboxRelation},
 			IssuerServiceAccount:    "transformation-storage-authority", ExpiresAt: time.Now().Add(time.Hour),
 			CleanupOwnerID: owner,
@@ -1433,13 +1433,13 @@ func TestPostgresGovernedStoreCleanupSelectorsMatchExactScope(t *testing.T) {
 	}
 
 	tenantReserved := reserve(tenantScope, "44444444-4444-4444-8444-444444444444")
-	if err := store.ClaimBucketOwnership(ctx, "hyperidle", "hyperidle-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "beacon", "beacon-files"); err != nil {
 		t.Fatal(err)
 	}
 	otherTenant, err := store.ReserveObject(ctx, RegisterActiveObjectInput{
-		Tenant: "hyperidle", Scope: tenantScope, ArtifactClass: ArtifactAnalysisResult,
+		Tenant: "beacon", Scope: tenantScope, ArtifactClass: ArtifactAnalysisResult,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/json",
-		Bucket: "hyperidle-files", Key: governedReservationKey(tenantScope, ArtifactAnalysisResult,
+		Bucket: "beacon-files", Key: governedReservationKey(tenantScope, ArtifactAnalysisResult,
 			"88888888-8888-4888-8888-888888888888"),
 		CleanupOwnerID: owner,
 	}, nil)
@@ -1448,16 +1448,16 @@ func TestPostgresGovernedStoreCleanupSelectorsMatchExactScope(t *testing.T) {
 	}
 	workspaceReserved := reserve(workspaceScope, "55555555-5555-4555-8555-555555555555")
 	tenantGrant := issue(tenantScope, "66666666-6666-4666-8666-666666666666",
-		registerStoreObject(t, ctx, store, "nimmly", tenantScope, "tenant-readable").ID)
+		registerStoreObject(t, ctx, store, "acme", tenantScope, "tenant-readable").ID)
 	workspaceGrant := issue(workspaceScope, "77777777-7777-4777-8777-777777777777",
-		registerStoreObject(t, ctx, store, "nimmly", workspaceScope, "workspace-readable").ID)
+		registerStoreObject(t, ctx, store, "acme", workspaceScope, "workspace-readable").ID)
 
-	if buckets, err := store.OrdinaryCleanupBuckets(ctx, "nimmly", tenantScope, owner, false); err != nil ||
-		!slices.Equal(buckets, []string{"nimmly-files"}) {
+	if buckets, err := store.OrdinaryCleanupBuckets(ctx, "acme", tenantScope, owner, false); err != nil ||
+		!slices.Equal(buckets, []string{"acme-files"}) {
 		t.Fatalf("tenant owner cleanup buckets = %v, %v", buckets, err)
 	}
 	firstRevocation := time.Now().UTC().Truncate(time.Microsecond)
-	if err := store.TombstoneOrdinaryObjects(ctx, "nimmly", tenantScope, owner, false, firstRevocation); err != nil {
+	if err := store.TombstoneOrdinaryObjects(ctx, "acme", tenantScope, owner, false, firstRevocation); err != nil {
 		t.Fatal(err)
 	}
 	if stateOf(tenantReserved.ID) != ObjectStateDeleted || stateOf(workspaceReserved.ID) != ObjectStateReserved ||
@@ -1471,32 +1471,32 @@ func TestPostgresGovernedStoreCleanupSelectorsMatchExactScope(t *testing.T) {
 	if revoked := revokedAtOf(workspaceGrant.ID); revoked.Valid {
 		t.Fatalf("tenant owner cleanup revoked a workspace grant at %v", revoked.Time)
 	}
-	if err := store.TombstoneOrdinaryObjects(ctx, "nimmly", tenantScope, owner, false,
+	if err := store.TombstoneOrdinaryObjects(ctx, "acme", tenantScope, owner, false,
 		firstRevocation.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if revoked := revokedAtOf(tenantGrant.ID); !revoked.Time.Equal(firstRevocation) {
 		t.Fatalf("retried cleanup moved tenant grant revocation to %v", revoked.Time)
 	}
-	pending, err := store.PendingOrdinaryObjectDeletions(ctx, "nimmly", tenantScope, owner, false, 10)
+	pending, err := store.PendingOrdinaryObjectDeletions(ctx, "acme", tenantScope, owner, false, 10)
 	if err != nil || len(pending) != 1 || pending[0].Object.ID != tenantReserved.ID {
 		t.Fatalf("tenant owner pending deletions = %#v, %v", pending, err)
 	}
-	if count, _, err := store.OrdinaryCleanupStatus(ctx, "nimmly", tenantScope, owner, false); err != nil || count != 1 {
+	if count, _, err := store.OrdinaryCleanupStatus(ctx, "acme", tenantScope, owner, false); err != nil || count != 1 {
 		t.Fatalf("tenant owner cleanup status = %d, %v", count, err)
 	}
-	if count, _, err := store.ReservationCleanupStatus(ctx, "nimmly", tenantScope); err != nil || count != 1 {
+	if count, _, err := store.ReservationCleanupStatus(ctx, "acme", tenantScope); err != nil || count != 1 {
 		t.Fatalf("tenant reservation cleanup status = %d, %v", count, err)
 	}
 
-	if err := store.TombstoneReservations(ctx, "nimmly", workspaceScope, firstRevocation); err != nil {
+	if err := store.TombstoneReservations(ctx, "acme", workspaceScope, firstRevocation); err != nil {
 		t.Fatal(err)
 	}
-	pending, err = store.PendingReservationDeletions(ctx, "nimmly", workspaceScope, 10)
+	pending, err = store.PendingReservationDeletions(ctx, "acme", workspaceScope, 10)
 	if err != nil || len(pending) != 1 || pending[0].Object.ID != workspaceReserved.ID {
 		t.Fatalf("workspace reservation pending deletions = %#v, %v", pending, err)
 	}
-	if count, _, err := store.OrdinaryCleanupStatus(ctx, "nimmly", workspaceScope, "", true); err != nil || count != 1 {
+	if count, _, err := store.OrdinaryCleanupStatus(ctx, "acme", workspaceScope, "", true); err != nil || count != 1 {
 		t.Fatalf("workspace cleanup status = %d, %v", count, err)
 	}
 	if revoked := revokedAtOf(workspaceGrant.ID); revoked.Valid {

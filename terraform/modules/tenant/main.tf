@@ -497,8 +497,7 @@ resource "kubernetes_role" "deployer" {
   #         the prior hook Job before re-creating it on the next upgrade.
   # get/list/watch: `helm upgrade --wait` polls the Job to completion.
   #
-  # ⚠️ This rule is added to the deployer Role for ALL tenants (ambrovia, hyperidle,
-  # nimmly, any future tenant), not just nimmly — it lives in the shared tenant module.
+  # This rule is added to every tenant deployer Role by the shared module.
   # Blast radius: every tenant's deploy credential gains batch/jobs (get/list/watch/
   # create/delete). No secret/exec access added. Any tenant adopting Helm-hook
   # migrations benefits automatically.
@@ -576,7 +575,7 @@ resource "postgresql_grant" "tenant_schema" {
 # =============================================================================
 
 # Database connection URL with search_path set to the tenant's schema.
-# HyperIdle's Drizzle uses pgTable() (unqualified names) — search_path resolves
+# ORMs can use unqualified table names — search_path resolves
 # all table references to the tenant schema. Zero app code changes required.
 resource "kubernetes_secret" "database_url" {
   metadata {

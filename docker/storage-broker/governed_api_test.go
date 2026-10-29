@@ -486,7 +486,7 @@ func (c *fakeObjectCleaner) WalkKeys(_ context.Context, _, _ string, visit func(
 	}
 	c.walks++
 	for _, key := range c.listed {
-		if !slices.Contains(c.deleted, "nimmly-files/"+key) {
+		if !slices.Contains(c.deleted, "acme-files/"+key) {
 			if err := visit(key); err != nil {
 				return err
 			}
@@ -539,8 +539,8 @@ func TestGovernedObjectDeleteConfirmsFinalAndStagingRemoval(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 	want := []string{
-		"nimmly-files/" + store.deletion.Object.Key,
-		"nimmly-files/governed-staging/workspace/" + workspaceA + "/transformation_sql/staged",
+		"acme-files/" + store.deletion.Object.Key,
+		"acme-files/governed-staging/workspace/" + workspaceA + "/transformation_sql/staged",
 	}
 	if !slices.Equal(cleaner.deleted, want) {
 		t.Fatalf("deleted locators = %#v, want %#v", cleaner.deleted, want)
@@ -762,7 +762,7 @@ func TestGovernedObjectDeleteCleansUnreferencedLegacyStaging(t *testing.T) {
 		governedDeleteRequest(store.deletion.Object.ID, WorkspaceStorageScope(workspaceA)))
 
 	if first.Code != http.StatusAccepted || store.recordSweepCalls != 1 || store.confirmRemovalCalls != 0 ||
-		!slices.Contains(cleaner.deleted, "nimmly-files/"+legacyKey) {
+		!slices.Contains(cleaner.deleted, "acme-files/"+legacyKey) {
 		t.Fatalf("first status = %d, sweeps = %d, confirmations = %d, deleted = %#v, body = %s",
 			first.Code, store.recordSweepCalls, store.confirmRemovalCalls, cleaner.deleted, first.Body.String())
 	}
@@ -774,7 +774,7 @@ func TestGovernedObjectDeleteCleansUnreferencedLegacyStaging(t *testing.T) {
 		t.Fatalf("legacy settling retry = header %q, body %d; want 300",
 			first.Header().Get("Retry-After"), firstBody.RetryAfterSeconds)
 	}
-	if !slices.Contains(store.registrationLocks, "nimmly/nimmly-files") || store.registrationBarrier {
+	if !slices.Contains(store.registrationLocks, "acme/acme-files") || store.registrationBarrier {
 		t.Fatalf("legacy staging deletion registration barrier = %#v, held after response = %t",
 			store.registrationLocks, store.registrationBarrier)
 	}
@@ -803,7 +803,7 @@ func TestGovernedObjectDeleteKeepsLegacyRemovalPendingWhileStagingIsReferenced(t
 	prefix := governedStagingPrefix(store.deletion.Object.Scope, store.deletion.Object.ArtifactClass)
 	liveKey := prefix + "live-reservation"
 	orphanedKey := prefix + "orphaned-upload"
-	store.referencedKeys = map[string]bool{"nimmly/nimmly-files/" + liveKey: true}
+	store.referencedKeys = map[string]bool{"acme/acme-files/" + liveKey: true}
 	store.livePrefixReferenced = true
 	cleaner := &fakeObjectCleaner{listed: []string{liveKey, orphanedKey}}
 	server := governedServerForTest("transformation-storage-authority", store)
@@ -815,8 +815,8 @@ func TestGovernedObjectDeleteKeepsLegacyRemovalPendingWhileStagingIsReferenced(t
 		governedDeleteRequest(store.deletion.Object.ID, WorkspaceStorageScope(workspaceA)))
 
 	if response.Code != http.StatusServiceUnavailable || store.confirmRemovalCalls != 0 ||
-		slices.Contains(cleaner.deleted, "nimmly-files/"+liveKey) ||
-		!slices.Contains(cleaner.deleted, "nimmly-files/"+orphanedKey) {
+		slices.Contains(cleaner.deleted, "acme-files/"+liveKey) ||
+		!slices.Contains(cleaner.deleted, "acme-files/"+orphanedKey) {
 		t.Fatalf("status = %d, confirmations = %d, deleted = %#v, body = %s",
 			response.Code, store.confirmRemovalCalls, cleaner.deleted, response.Body.String())
 	}
@@ -873,17 +873,17 @@ func TestRegisterExistingHoldsPhysicalKeyLockThroughRegistration(t *testing.T) {
 	contentHash := hex.EncodeToString(digest[:])
 	key := "governed-staging/workspace/" + workspaceA + "/transformation_sql/legacy"
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/nimmly-files/"+key {
+		if r.Method != http.MethodGet || r.URL.Path != "/acme-files/"+key {
 			t.Errorf("verification request = %s %s", r.Method, r.URL.Path)
 		}
 		_, _ = w.Write(payload)
 	}))
 	defer backend.Close()
 	store := &fakeGovernedStore{object: GovernedObject{
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactTransformationSQL,
 		ContentHash: contentHash, ByteSize: int64(len(payload)), MediaType: "text/sql",
-		State: ObjectStateActive, Bucket: "nimmly-files", Key: key,
+		State: ObjectStateActive, Bucket: "acme-files", Key: key,
 	}}
 	server := governedServerForTest("transformation-storage-authority", store)
 	server.presigner = NewPresigner(&Config{
@@ -906,7 +906,7 @@ func TestRegisterExistingHoldsPhysicalKeyLockThroughRegistration(t *testing.T) {
 			response.Code, store.registerSawKeyLock, store.registerSawBarrier,
 			store.physicalKeyLockHeld, store.registrationBarrier, response.Body.String())
 	}
-	wantLock := "nimmly/nimmly-files/" + key
+	wantLock := "acme/acme-files/" + key
 	if !slices.Contains(store.physicalKeyLockCalls, wantLock) {
 		t.Fatalf("physical key lock calls = %#v, want %q", store.physicalKeyLockCalls, wantLock)
 	}
@@ -941,10 +941,10 @@ func TestLegacyPresignRejectsConflictingPersistedBucketOwner(t *testing.T) {
 		policy: &Policy{
 			DefaultTTLSeconds: TTLConfig{Put: 300},
 			Namespaces: map[string]NamespacePolicy{
-				"nimmly": {Bucket: "nimmly-files", Ops: []string{"put"}, Prefixes: []string{"corpus/"}},
+				"acme": {Bucket: "acme-files", Ops: []string{"put"}, Prefixes: []string{"corpus/"}},
 			},
 		},
-		appAuth:       fixedReviewer{namespace: "nimmly", account: "crawler"},
+		appAuth:       fixedReviewer{namespace: "acme", account: "crawler"},
 		governedStore: store,
 		log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -956,7 +956,7 @@ func TestLegacyPresignRejectsConflictingPersistedBucketOwner(t *testing.T) {
 	server.handlePresign(response, request)
 
 	if response.Code != http.StatusConflict ||
-		!slices.Contains(store.claimedBuckets, "nimmly/nimmly-files") {
+		!slices.Contains(store.claimedBuckets, "acme/acme-files") {
 		t.Fatalf("status = %d, claims = %#v, body = %s",
 			response.Code, store.claimedBuckets, response.Body.String())
 	}
@@ -969,10 +969,10 @@ func TestLegacyPresignReportsTransientBucketOwnershipFailure(t *testing.T) {
 		policy: &Policy{
 			DefaultTTLSeconds: TTLConfig{Put: 300},
 			Namespaces: map[string]NamespacePolicy{
-				"nimmly": {Bucket: "nimmly-files", Ops: []string{"put"}, Prefixes: []string{"corpus/"}},
+				"acme": {Bucket: "acme-files", Ops: []string{"put"}, Prefixes: []string{"corpus/"}},
 			},
 		},
-		appAuth:       fixedReviewer{namespace: "nimmly", account: "crawler"},
+		appAuth:       fixedReviewer{namespace: "acme", account: "crawler"},
 		governedStore: store,
 		log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -995,10 +995,10 @@ func TestMultipartReportsTransientBucketOwnershipFailure(t *testing.T) {
 		policy: &Policy{
 			DefaultTTLSeconds: TTLConfig{Multipart: 300},
 			Namespaces: map[string]NamespacePolicy{
-				"nimmly": {Bucket: "nimmly-files", Ops: []string{"multipart"}, Prefixes: []string{"corpus/"}},
+				"acme": {Bucket: "acme-files", Ops: []string{"multipart"}, Prefixes: []string{"corpus/"}},
 			},
 		},
-		appAuth:       fixedReviewer{namespace: "nimmly", account: "crawler"},
+		appAuth:       fixedReviewer{namespace: "acme", account: "crawler"},
 		governedStore: store,
 		log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -1044,10 +1044,10 @@ func TestGovernedObjectDeleteRejectsControllerBeforeStore(t *testing.T) {
 
 func deletionStore(revokedAt time.Time) *fakeGovernedStore {
 	object := GovernedObject{
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactTransformationSQL,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "text/sql", State: ObjectStateDeleted,
-		Bucket: "nimmly-files",
+		Bucket: "acme-files",
 	}
 	object.Key = governedObjectKey(object.Scope, object.ArtifactClass, object.ContentHash, object.ID)
 	return &fakeGovernedStore{object: object, deletion: GovernedObjectDeletion{
@@ -1110,10 +1110,10 @@ func assertReservationCleanupResponse(
 
 func TestGovernedObjectTicketReturnsNoPhysicalLocator(t *testing.T) {
 	store := &fakeGovernedStore{object: GovernedObject{
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactWorkBundle,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-		State: ObjectStateActive, Bucket: "nimmly-files", Key: "secret/physical/key.parquet",
+		State: ObjectStateActive, Bucket: "acme-files", Key: "secret/physical/key.parquet",
 	}}
 	server := governedServerForTest("transformation-sandbox-controller", store)
 	request := httptest.NewRequest(http.MethodPost, "/v2/grants/55555555-5555-4555-8555-555555555555/objects/44444444-4444-4444-8444-444444444444/ticket",
@@ -1181,7 +1181,7 @@ func TestGovernedGrantIssueRejectsControllerRoleBeforeStore(t *testing.T) {
 
 func TestGovernedGrantIssueRequiresAndForwardsCleanupOwner(t *testing.T) {
 	store := &fakeGovernedStore{grant: ExecutionGrant{SchemaVersion: 1,
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA),
 	}}
 	server := governedServerForTest("transformation-storage-authority", store)
@@ -1218,7 +1218,7 @@ func TestGovernedGrantIssueEncodesReadOnlyGrantForClients(t *testing.T) {
 	expiresAt := time.Now().Add(time.Hour).Truncate(time.Second).UTC()
 	clientExpiry := expiresAt.Format("2006-01-02T15:04:05.000Z07:00") // JavaScript toISOString shape
 	store := &fakeGovernedStore{grant: ExecutionGrant{SchemaVersion: 1,
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA), ExecutionID: "33333333-3333-4333-8333-333333333333",
 		ReadableObjectIDs: []string{"55555555-5555-4555-8555-555555555555"},
 		// A read-only grant, carrying the non-UTC location a database scan can return.
@@ -1276,10 +1276,10 @@ func TestExecutionGrantJSONNeverEncodesNullLists(t *testing.T) {
 
 func TestGovernedObjectReservePersistsWorkspaceScopeWithoutExposingLocator(t *testing.T) {
 	store := &fakeGovernedStore{object: GovernedObject{
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactTransformationSQL,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "text/sql",
-		State: ObjectStateReserved, Bucket: "nimmly-files",
+		State: ObjectStateReserved, Bucket: "acme-files",
 		Key: "governed-staging/workspace/" + workspaceA + "/transformation_sql/44444444-4444-4444-8444-444444444444",
 	}}
 	server := governedServerForTest("transformation-storage-authority", store)
@@ -1357,9 +1357,9 @@ func TestCleanupOwnerRevokesReservedAndActiveWithoutCrossingOwnerOrClass(t *test
 	otherOwnerID := "33333333-3333-4333-8333-333333333333"
 	makeDeletion := func(id string, state ObjectState, class ArtifactClass) GovernedObjectDeletion {
 		return GovernedObjectDeletion{Object: GovernedObject{
-			ID: id, Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: class,
+			ID: id, Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: class,
 			ContentHash: testContentHash, ByteSize: 12, MediaType: "application/octet-stream",
-			State: state, Bucket: "nimmly-files", Key: "staging/" + id,
+			State: state, Bucket: "acme-files", Key: "staging/" + id,
 		}, StagingKey: "staging/" + id}
 	}
 	reserved := makeDeletion("44444444-4444-4444-8444-444444444444", ObjectStateReserved,
@@ -1437,10 +1437,10 @@ func TestWorkspaceOrdinaryCleanupRequiresWorkspaceAuthority(t *testing.T) {
 
 func TestGovernedOutputReserveSignsTicketInsideReservation(t *testing.T) {
 	store := &fakeGovernedStore{object: GovernedObject{
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactSandboxRelation,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/parquet",
-		State: ObjectStateReserved, Bucket: "nimmly-files",
+		State: ObjectStateReserved, Bucket: "acme-files",
 		Key: "governed-staging/workspace/" + workspaceA + "/sandbox_relation/output",
 	}}
 	server := governedServerForTest("transformation-sandbox-controller", store)
@@ -1462,7 +1462,7 @@ func TestGovernedOutputReserveSignsTicketInsideReservation(t *testing.T) {
 		t.Fatalf("status = %d, tickets signed inside reservation = %d, session barrier = %t, body = %s",
 			response.Code, store.ticketsIssuedInReservation, store.registrationBarrier, response.Body.String())
 	}
-	if !slices.Contains(store.claimedBuckets, "nimmly/nimmly-files") {
+	if !slices.Contains(store.claimedBuckets, "acme/acme-files") {
 		t.Fatalf("output reservation skipped bucket registration check: %#v", store.claimedBuckets)
 	}
 }
@@ -1535,15 +1535,15 @@ func governedServerForTest(account string, store GovernedStore) *server {
 		S3AccessKey: "test-access", S3SecretKey: "test-secret",
 	}
 	return &server{
-		appAuth: fixedReviewer{namespace: "nimmly", account: account},
+		appAuth: fixedReviewer{namespace: "acme", account: account},
 		policy: &Policy{
 			DefaultTTLSeconds: TTLConfig{Get: 900, Put: 300},
 			Namespaces: map[string]NamespacePolicy{
-				"nimmly": {Bucket: "nimmly-files"},
+				"acme": {Bucket: "acme-files"},
 			},
 		},
 		governedPolicy: &GovernedPolicy{Namespaces: map[string]GovernedNamespacePolicy{
-			"nimmly": {ServiceAccounts: map[string][]GovernedOperation{
+			"acme": {ServiceAccounts: map[string][]GovernedOperation{
 				"transformation-sandbox-controller": {OperationConsumeGrant, OperationRevokeGrant, OperationRegisterOutput},
 				"transformation-storage-authority":  {OperationRegisterObject, OperationDeleteObject, OperationIssueGrant, OperationConsumeGrant, OperationRevokeGrant, OperationLakeDelete},
 			}},
@@ -1556,10 +1556,10 @@ func governedServerForTest(account string, store GovernedStore) *server {
 
 func TestGovernedReadTicketTakesNoMutationLock(t *testing.T) {
 	store := &fakeGovernedStore{object: GovernedObject{
-		ID: "44444444-4444-4444-8444-444444444444", Tenant: "nimmly",
+		ID: "44444444-4444-4444-8444-444444444444", Tenant: "acme",
 		Scope: WorkspaceStorageScope(workspaceA), ArtifactClass: ArtifactTransformationSQL,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "text/sql",
-		State: ObjectStateActive, Bucket: "nimmly-files", Key: "governed/final/object",
+		State: ObjectStateActive, Bucket: "acme-files", Key: "governed/final/object",
 	}}
 	server := governedServerForTest("transformation-sandbox-controller", store)
 	request := httptest.NewRequest(http.MethodPost,

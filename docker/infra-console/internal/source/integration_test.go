@@ -492,7 +492,7 @@ func TestRealZitadelUnknownOrg(t *testing.T) {
 
 // -------------------------------------------------------------------- github
 
-// The real GitHub API, against this very repository.
+// The real GitHub API, against an explicitly selected fixture repository.
 //
 // GitHub is a hosted service with no self-hostable server, so this is one of
 // two sources that cannot be stood up locally. It runs against the real API
@@ -518,7 +518,11 @@ func TestRealGitHubResolvesACommitToItsRun(t *testing.T) {
 	// test exercise one chain rather than two.
 	sha := env(t, "INTEG_SEED_SHA")
 
-	run, err := g.RunForCommit(ctx(t), "ambrovia", "infra", sha)
+	owner, repo := os.Getenv("INTEG_GITHUB_OWNER"), os.Getenv("INTEG_GITHUB_REPO")
+	if owner == "" || repo == "" {
+		t.Fatal("INTEG_GITHUB_OWNER and INTEG_GITHUB_REPO must identify the repository containing INTEG_SEED_SHA")
+	}
+	run, err := g.RunForCommit(ctx(t), owner, repo, sha)
 	if err != nil {
 		t.Fatalf("RunForCommit against the real API: %v", err)
 	}

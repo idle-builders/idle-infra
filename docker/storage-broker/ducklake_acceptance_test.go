@@ -35,7 +35,7 @@ func TestRealDuckLakeAgainstGovernedS3Surface(t *testing.T) {
 	command.Env = append(os.Environ(),
 		"DUCKDB_NODE_API_ROOT="+nodeAPIRoot,
 		"DUCKLAKE_BROKER_ENDPOINT="+parsedEndpoint.Host,
-		"DUCKLAKE_BUCKET=nimmly-files",
+		"DUCKLAKE_BUCKET=acme-files",
 		"DUCKLAKE_SESSION_TOKEN=reviewed-token",
 		"DUCKLAKE_AUTHORITY=workspace-"+workspaceA,
 		"DUCKLAKE_OTHER_AUTHORITY=workspace-"+workspaceB,

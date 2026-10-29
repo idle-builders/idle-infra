@@ -21,26 +21,26 @@ func TestPositiveDecisionCacheCachesOnlySuccessUntilExpiry(t *testing.T) {
 		return decision
 	}
 
-	if err := cache.verify("nimmly\nnimmly-files", decide); !errors.Is(err, decision) || calls != 1 {
+	if err := cache.verify("acme\nacme-files", decide); !errors.Is(err, decision) || calls != 1 {
 		t.Fatalf("first failing decision = %v after %d calls", err, calls)
 	}
-	if err := cache.verify("nimmly\nnimmly-files", decide); !errors.Is(err, decision) || calls != 2 {
+	if err := cache.verify("acme\nacme-files", decide); !errors.Is(err, decision) || calls != 2 {
 		t.Fatalf("failure was cached: %v after %d calls", err, calls)
 	}
 	decision = nil
-	if err := cache.verify("nimmly\nnimmly-files", decide); err != nil || calls != 3 {
+	if err := cache.verify("acme\nacme-files", decide); err != nil || calls != 3 {
 		t.Fatalf("successful decision = %v after %d calls", err, calls)
 	}
 	now = now.Add(29 * time.Second)
-	if err := cache.verify("nimmly\nnimmly-files", decide); err != nil || calls != 3 {
+	if err := cache.verify("acme\nacme-files", decide); err != nil || calls != 3 {
 		t.Fatalf("cached success = %v after %d calls", err, calls)
 	}
-	if err := cache.verify("ambrovia\nnimmly-files", decide); err != nil || calls != 4 {
+	if err := cache.verify("atlas\nacme-files", decide); err != nil || calls != 4 {
 		t.Fatalf("decision leaked across keys: %v after %d calls", err, calls)
 	}
 	now = now.Add(time.Second)
 	decision = ErrGovernedConflict
-	if err := cache.verify("nimmly\nnimmly-files", decide); !errors.Is(err, ErrGovernedConflict) || calls != 5 {
+	if err := cache.verify("acme\nacme-files", decide); !errors.Is(err, ErrGovernedConflict) || calls != 5 {
 		t.Fatalf("expired success was not re-evaluated: %v after %d calls", err, calls)
 	}
 }
@@ -48,7 +48,7 @@ func TestPositiveDecisionCacheCachesOnlySuccessUntilExpiry(t *testing.T) {
 func TestPostgresGovernedStoreReservationsDoNotExcludeEachOther(t *testing.T) {
 	ctx := context.Background()
 	db, store := newConcurrencyTestStore(t, "storage_broker_parallel_reserve")
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -56,8 +56,8 @@ func TestPostgresGovernedStoreReservationsDoNotExcludeEachOther(t *testing.T) {
 	// shared bucket barrier. Every other reservation, ordinary and grant output,
 	// must still complete without waiting for it and without serialization
 	// failures, even though they all write the same workspace's locator range.
-	readable := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceA), "grant-input")
-	releaseHeld, heldDone := holdReservationOpen(t, ctx, store, "nimmly", "nimmly-files")
+	readable := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceA), "grant-input")
+	releaseHeld, heldDone := holdReservationOpen(t, ctx, store, "acme", "acme-files")
 	defer releaseHeld()
 
 	const ordinaryReservations = 24
@@ -65,7 +65,7 @@ func TestPostgresGovernedStoreReservationsDoNotExcludeEachOther(t *testing.T) {
 	grants := make([]ExecutionGrant, grantOutputs)
 	for index := range grants {
 		grant, err := store.IssueGrant(ctx, IssueGrantInput{
-			Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA),
+			Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA),
 			ExecutionID:             mustUUID(t),
 			ReadableObjectIDs:       []string{readable.ID},
 			WritableArtifactClasses: []ArtifactClass{ArtifactSandboxRelation},
@@ -86,7 +86,7 @@ func TestPostgresGovernedStoreReservationsDoNotExcludeEachOther(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := store.ReserveObject(ctx, testReservation(t, "nimmly", "nimmly-files"),
+			_, err := store.ReserveObject(ctx, testReservation(t, "acme", "acme-files"),
 				func(GovernedObject) error { return nil })
 			errs <- err
 		}()
@@ -97,9 +97,9 @@ func TestPostgresGovernedStoreReservationsDoNotExcludeEachOther(t *testing.T) {
 			defer wg.Done()
 			<-start
 			_, err := store.ReserveGrantOutput(ctx, ReserveGrantOutputInput{
-				Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+				Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 				ArtifactClass: ArtifactSandboxRelation, ContentHash: testContentHash,
-				ByteSize: 12, MediaType: "application/parquet", Bucket: "nimmly-files", Now: time.Now(),
+				ByteSize: 12, MediaType: "application/parquet", Bucket: "acme-files", Now: time.Now(),
 			}, func(GovernedObject) error { return nil })
 			errs <- err
 		}()
@@ -138,7 +138,7 @@ func TestPostgresGovernedStoreReservationsDoNotExcludeEachOther(t *testing.T) {
 func TestPostgresGovernedStoreReservationIssuerFailureRollsBack(t *testing.T) {
 	ctx := context.Background()
 	db, store := newConcurrencyTestStore(t, "storage_broker_issuer_rollback")
-	input := testReservation(t, "nimmly", "nimmly-files")
+	input := testReservation(t, "acme", "acme-files")
 	issueErr := errors.New("signing failed")
 	if _, err := store.ReserveObject(ctx, input, func(GovernedObject) error { return issueErr }); !errors.Is(err, issueErr) {
 		t.Fatalf("reservation error = %v, want issuer error", err)
@@ -161,14 +161,14 @@ func TestPostgresGovernedStoreCleanupBarrierOrdersReservationTickets(t *testing.
 	// Cleanup first: the exclusive session barrier (the same lock an older
 	// replica takes for its reservations) keeps a new reservation from writing
 	// or signing anything until cleanup releases it.
-	releaseCleanup, err := store.AcquireRegistrationBarrier(ctx, "nimmly", "nimmly-files")
+	releaseCleanup, err := store.AcquireRegistrationBarrier(ctx, "acme", "acme-files")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var signed sync.Mutex
 	signedCalls := 0
 	reservationDone := make(chan error, 1)
-	input := testReservation(t, "nimmly", "nimmly-files")
+	input := testReservation(t, "acme", "acme-files")
 	go func() {
 		_, err := store.ReserveObject(ctx, input, func(GovernedObject) error {
 			signed.Lock()
@@ -204,7 +204,7 @@ func TestPostgresGovernedStoreCleanupBarrierOrdersReservationTickets(t *testing.
 	proceed := make(chan struct{})
 	reservationDone = make(chan error, 1)
 	go func() {
-		_, err := store.ReserveObject(ctx, testReservation(t, "nimmly", "nimmly-files"),
+		_, err := store.ReserveObject(ctx, testReservation(t, "acme", "acme-files"),
 			func(GovernedObject) error {
 				signedAt = time.Now()
 				close(held)
@@ -220,7 +220,7 @@ func TestPostgresGovernedStoreCleanupBarrierOrdersReservationTickets(t *testing.
 	}
 	cleanupDone := make(chan cleanupResult, 1)
 	go func() {
-		release, err := store.AcquireRegistrationBarrier(ctx, "nimmly", "nimmly-files")
+		release, err := store.AcquireRegistrationBarrier(ctx, "acme", "acme-files")
 		if err != nil {
 			cleanupDone <- cleanupResult{err: err}
 			return
@@ -228,7 +228,7 @@ func TestPostgresGovernedStoreCleanupBarrierOrdersReservationTickets(t *testing.
 		defer release()
 		revokedAt := time.Now()
 		cleanupDone <- cleanupResult{revokedAt: revokedAt,
-			err: store.TombstoneReservations(ctx, "nimmly", scope, revokedAt)}
+			err: store.TombstoneReservations(ctx, "acme", scope, revokedAt)}
 	}()
 	select {
 	case result := <-cleanupDone:
@@ -266,33 +266,33 @@ func TestPostgresGovernedStoreCachesOnlyPositiveBucketDecisions(t *testing.T) {
 	store.bucketClaims = newPositiveDecisionCache(bucketOwnershipCacheTTL, clock)
 	store.bucketExclusivity = newPositiveDecisionCache(bucketOwnershipCacheTTL, clock)
 
-	if err := store.VerifyBucketRegistration(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.VerifyBucketRegistration(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.VerifyBucketRegistration(ctx, "ambrovia", "nimmly-files"); !errors.Is(err, ErrGovernedConflict) {
+	if err := store.VerifyBucketRegistration(ctx, "atlas", "acme-files"); !errors.Is(err, ErrGovernedConflict) {
 		t.Fatalf("foreign registration = %v, want conflict", err)
 	}
 	// Tamper with the insert-only owner row outside the broker. Within the TTL a
 	// replica keeps its positive answer without querying; after it, the change is
 	// observed. Denials are never cached, so the new owner is accepted at once.
 	if _, err := db.ExecContext(ctx, `UPDATE "`+schema+`".storage_bucket_owners
-		SET tenant_id = 'ambrovia' WHERE physical_bucket = 'nimmly-files'`); err != nil {
+		SET tenant_id = 'atlas' WHERE physical_bucket = 'acme-files'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.VerifyBucketRegistration(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.VerifyBucketRegistration(ctx, "acme", "acme-files"); err != nil {
 		t.Fatalf("cached registration decision = %v", err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatalf("cached ownership claim = %v", err)
 	}
-	if err := store.VerifyBucketRegistration(ctx, "ambrovia", "nimmly-files"); err != nil {
+	if err := store.VerifyBucketRegistration(ctx, "atlas", "acme-files"); err != nil {
 		t.Fatalf("denial was cached: %v", err)
 	}
 	now = now.Add(bucketOwnershipCacheTTL)
-	if err := store.VerifyBucketRegistration(ctx, "nimmly", "nimmly-files"); !errors.Is(err, ErrGovernedConflict) {
+	if err := store.VerifyBucketRegistration(ctx, "acme", "acme-files"); !errors.Is(err, ErrGovernedConflict) {
 		t.Fatalf("expired registration decision = %v, want conflict", err)
 	}
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); !errors.Is(err, ErrGovernedConflict) {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); !errors.Is(err, ErrGovernedConflict) {
 		t.Fatalf("expired ownership claim = %v, want conflict", err)
 	}
 }
@@ -300,25 +300,25 @@ func TestPostgresGovernedStoreCachesOnlyPositiveBucketDecisions(t *testing.T) {
 func TestPostgresGovernedStoreExclusivityFindsForeignRowsOnBothSides(t *testing.T) {
 	ctx := context.Background()
 	_, store := newConcurrencyTestStore(t, "storage_broker_exclusivity")
-	if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
-	registerStoreObjectInBucket(t, ctx, store, "nimmly", "nimmly-files", "own")
-	if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "nimmly", "nimmly-files"); err != nil || !exclusive {
+	registerStoreObjectInBucket(t, ctx, store, "acme", "acme-files", "own")
+	if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "acme", "acme-files"); err != nil || !exclusive {
 		t.Fatalf("own rows only = %t, %v", exclusive, err)
 	}
 	for _, foreign := range []string{"aaa", "zzz"} {
 		t.Run(foreign, func(t *testing.T) {
 			bucket := "shared-" + foreign
-			if err := store.ClaimBucketOwnership(ctx, "nimmly", bucket); err != nil {
+			if err := store.ClaimBucketOwnership(ctx, "acme", bucket); err != nil {
 				t.Fatal(err)
 			}
-			registerStoreObjectInBucket(t, ctx, store, "nimmly", bucket, "own")
+			registerStoreObjectInBucket(t, ctx, store, "acme", bucket, "own")
 			registerStoreObjectInBucket(t, ctx, store, foreign, bucket, "foreign")
-			if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "nimmly", bucket); err != nil || exclusive {
+			if exclusive, err := store.IsBucketExclusiveToTenant(ctx, "acme", bucket); err != nil || exclusive {
 				t.Fatalf("foreign tenant %q sorting around owner = %t, %v", foreign, exclusive, err)
 			}
-			if err := store.VerifyBucketRegistration(ctx, "nimmly", bucket); !errors.Is(err, ErrGovernedConflict) {
+			if err := store.VerifyBucketRegistration(ctx, "acme", bucket); !errors.Is(err, ErrGovernedConflict) {
 				t.Fatalf("registration into shared history = %v, want conflict", err)
 			}
 		})
@@ -482,7 +482,7 @@ func productionPoolTestStore(t *testing.T, prefix string) (*sql.DB, *PostgresGov
 	db, store := newConcurrencyTestStore(t, prefix)
 	db.SetMaxOpenConns(16)
 	db.SetMaxIdleConns(16)
-	if err := store.ClaimBucketOwnership(context.Background(), "nimmly", "nimmly-files"); err != nil {
+	if err := store.ClaimBucketOwnership(context.Background(), "acme", "acme-files"); err != nil {
 		t.Fatal(err)
 	}
 	return db, store
@@ -497,7 +497,7 @@ func startReservations(
 	t.Helper()
 	results := make(chan error, count)
 	for index := 0; index < count; index++ {
-		input := testReservation(t, "nimmly", "nimmly-files")
+		input := testReservation(t, "acme", "acme-files")
 		go func() {
 			_, err := store.ReserveObject(ctx, input, func(GovernedObject) error { return nil })
 			results <- err
@@ -526,7 +526,7 @@ func awaitReservations(t *testing.T, results <-chan error, count int) {
 func TestPostgresGovernedStoreWaitingReservationsDoNotStarveCleanup(t *testing.T) {
 	db, store := productionPoolTestStore(t, "storage_broker_starve_cleanup")
 	ctx := context.Background()
-	releaseCleanup, err := store.AcquireRegistrationBarrier(ctx, "nimmly", "nimmly-files")
+	releaseCleanup, err := store.AcquireRegistrationBarrier(ctx, "acme", "acme-files")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +548,7 @@ func TestPostgresGovernedStoreWaitingReservationsDoNotStarveCleanup(t *testing.T
 			t.Fatalf("%d reservations blocked on the barrier while holding a connection", waiting)
 		}
 		stepCtx, cancelStep := context.WithTimeout(ctx, time.Second)
-		err = store.TombstoneReservations(stepCtx, "nimmly", WorkspaceStorageScope(workspaceA), time.Now())
+		err = store.TombstoneReservations(stepCtx, "acme", WorkspaceStorageScope(workspaceA), time.Now())
 		cancelStep()
 		if err != nil {
 			cancelReservations()
@@ -568,7 +568,7 @@ func TestPostgresGovernedStoreQueuedCleanupDoesNotDeadlockRegisterExisting(t *te
 	db, store := productionPoolTestStore(t, "storage_broker_register_deadlock")
 	ctx := context.Background()
 	key := "governed/test/register-existing-behind-cleanup"
-	releaseExisting, err := store.AcquireRegisterExistingLock(ctx, "nimmly", "nimmly-files", key)
+	releaseExisting, err := store.AcquireRegisterExistingLock(ctx, "acme", "acme-files", key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestPostgresGovernedStoreQueuedCleanupDoesNotDeadlockRegisterExisting(t *te
 	cleanupAcquired := make(chan func(), 1)
 	cleanupErr := make(chan error, 1)
 	go func() {
-		release, err := store.AcquireRegistrationBarrier(cleanupCtx, "nimmly", "nimmly-files")
+		release, err := store.AcquireRegistrationBarrier(cleanupCtx, "acme", "acme-files")
 		if err != nil {
 			cleanupErr <- err
 			return
@@ -593,9 +593,9 @@ func TestPostgresGovernedStoreQueuedCleanupDoesNotDeadlockRegisterExisting(t *te
 	stats := db.Stats()
 	stepCtx, cancelStep := context.WithTimeout(ctx, 3*time.Second)
 	_, err = store.RegisterActiveObject(stepCtx, RegisterActiveObjectInput{
-		Tenant: "nimmly", Scope: TenantStorageScope(), ArtifactClass: ArtifactWorkBundle,
+		Tenant: "acme", Scope: TenantStorageScope(), ArtifactClass: ArtifactWorkBundle,
 		ContentHash: testContentHash, ByteSize: 12, MediaType: "application/vnd.apache.parquet",
-		Bucket: "nimmly-files", Key: key,
+		Bucket: "acme-files", Key: key,
 	})
 	cancelStep()
 	if err != nil {
@@ -621,16 +621,16 @@ func TestPostgresGovernedStoreMigrationRejectsForeignHistoryOnBothSides(t *testi
 		t.Run(foreign, func(t *testing.T) {
 			ctx := context.Background()
 			_, store := newConcurrencyTestStore(t, "storage_broker_migrate_history")
-			if err := store.ClaimBucketOwnership(ctx, "nimmly", "nimmly-files"); err != nil {
+			if err := store.ClaimBucketOwnership(ctx, "acme", "acme-files"); err != nil {
 				t.Fatal(err)
 			}
-			registerStoreObjectInBucket(t, ctx, store, "nimmly", "nimmly-files", "own")
+			registerStoreObjectInBucket(t, ctx, store, "acme", "acme-files", "own")
 			if err := store.Migrate(ctx); err != nil {
 				t.Fatalf("migration over exclusive history: %v", err)
 			}
-			registerStoreObjectInBucket(t, ctx, store, foreign, "nimmly-files", "foreign")
+			registerStoreObjectInBucket(t, ctx, store, foreign, "acme-files", "foreign")
 			if err := store.Migrate(ctx); err == nil {
-				t.Fatalf("migration accepted tenant %q's row in a bucket owned by nimmly", foreign)
+				t.Fatalf("migration accepted tenant %q's row in a bucket owned by acme", foreign)
 			}
 		})
 	}
@@ -660,9 +660,9 @@ func TestPostgresGovernedStoreReservationGivesUpOnLongCleanup(t *testing.T) {
 	db, store := productionPoolTestStore(t, "storage_broker_barrier_wait")
 	ctx := context.Background()
 	store.registrationBarrierWait = 300 * time.Millisecond
-	readable := registerStoreObject(t, ctx, store, "nimmly", WorkspaceStorageScope(workspaceA), "grant-input")
+	readable := registerStoreObject(t, ctx, store, "acme", WorkspaceStorageScope(workspaceA), "grant-input")
 	grant, err := store.IssueGrant(ctx, IssueGrantInput{
-		Tenant: "nimmly", Scope: WorkspaceStorageScope(workspaceA), ExecutionID: mustUUID(t),
+		Tenant: "acme", Scope: WorkspaceStorageScope(workspaceA), ExecutionID: mustUUID(t),
 		ReadableObjectIDs: []string{readable.ID}, WritableArtifactClasses: []ArtifactClass{ArtifactSandboxRelation},
 		IssuerServiceAccount: "transformation-storage-authority", ExpiresAt: time.Now().Add(time.Hour),
 		CleanupOwnerID: mustUUID(t),
@@ -670,7 +670,7 @@ func TestPostgresGovernedStoreReservationGivesUpOnLongCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanupRelease, err := store.AcquireRegistrationBarrier(ctx, "nimmly", "nimmly-files")
+	cleanupRelease, err := store.AcquireRegistrationBarrier(ctx, "acme", "acme-files")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -680,12 +680,12 @@ func TestPostgresGovernedStoreReservationGivesUpOnLongCleanup(t *testing.T) {
 
 	// The request context never ends; only the server-side bound stops the wait.
 	started := time.Now()
-	_, reserveErr := store.ReserveObject(ctx, testReservation(t, "nimmly", "nimmly-files"),
+	_, reserveErr := store.ReserveObject(ctx, testReservation(t, "acme", "acme-files"),
 		func(GovernedObject) error { return nil })
 	_, outputErr := store.ReserveGrantOutput(ctx, ReserveGrantOutputInput{
-		Tenant: "nimmly", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
+		Tenant: "acme", GrantID: grant.ID, ExecutionID: grant.ExecutionID,
 		ArtifactClass: ArtifactSandboxRelation, ContentHash: testContentHash, ByteSize: 12,
-		MediaType: "application/parquet", Bucket: "nimmly-files", Now: time.Now(),
+		MediaType: "application/parquet", Bucket: "acme-files", Now: time.Now(),
 	}, func(GovernedObject) error { return nil })
 	elapsed := time.Since(started)
 	if !errors.Is(reserveErr, ErrRegistrationBusy) || !errors.Is(outputErr, ErrRegistrationBusy) {
@@ -703,7 +703,7 @@ func TestPostgresGovernedStoreReservationGivesUpOnLongCleanup(t *testing.T) {
 		t.Fatalf("timed-out reservations wrote %d rows", rows)
 	}
 	releaseCleanup()
-	if _, err := store.ReserveObject(ctx, testReservation(t, "nimmly", "nimmly-files"),
+	if _, err := store.ReserveObject(ctx, testReservation(t, "acme", "acme-files"),
 		func(GovernedObject) error { return nil }); err != nil {
 		t.Fatalf("reservation after cleanup: %v", err)
 	}

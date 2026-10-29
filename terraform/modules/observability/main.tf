@@ -505,6 +505,10 @@ resource "kubernetes_cron_job_v1" "compactor" {
                 value = "120"
               }
               env {
+                name  = "APPLICATION_TELEMETRY_SOURCES_JSON"
+                value = jsonencode(var.application_telemetry_sources)
+              }
+              env {
                 name  = "RAW_RETENTION_SECONDS"
                 value = tostring(var.raw_retention_seconds)
               }

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -71,6 +71,7 @@ struct SlowCandidate {
 
 #[derive(Default)]
 pub struct ApplicationWindow {
+    sources: Vec<ApplicationSource>,
     source_window: String,
     important_log_traces: HashSet<String>,
     failed_execution_traces: HashSet<String>,
@@ -102,9 +103,10 @@ pub struct ApplicationWindow {
 }
 
 impl ApplicationWindow {
-    pub fn with_period(period: &str) -> Self {
+    pub fn with_period(period: &str, sources: &[ApplicationSource]) -> Self {
         Self {
             source_window: period.to_owned(),
+            sources: sources.to_vec(),
             ..Self::default()
         }
     }
@@ -115,7 +117,7 @@ impl ApplicationWindow {
 
     pub fn observe_logs(&mut self, rows: &[TelemetryRow]) {
         for row in rows {
-            if !is_application_row(row) {
+            if !is_application_row(row, &self.sources) {
                 continue;
             }
             let Some(service_key) = service_key(row) else {
@@ -174,7 +176,7 @@ impl ApplicationWindow {
 
     pub fn observe_traces(&mut self, rows: &[TelemetryRow]) {
         for row in rows {
-            if row.signal != "traces" || !is_application_row(row) {
+            if row.signal != "traces" || !is_application_row(row, &self.sources) {
                 continue;
             }
             let Some(trace_id) = row.trace_id.as_deref() else {
@@ -197,7 +199,7 @@ impl ApplicationWindow {
                 .entry(trace_id.to_owned())
                 .or_default()
                 .insert(service_key.clone());
-            let is_root = is_application_execution(row);
+            let is_root = is_application_execution(row, &self.sources);
             let count = if is_root {
                 self.observed_roots.entry(trace_id.to_owned()).or_default()
             } else {
@@ -377,7 +379,7 @@ impl ApplicationWindow {
             Standalone(ServiceKey),
         }
 
-        if !is_application_row(&row) {
+        if !is_application_row(&row, &self.sources) {
             return None;
         }
         let decision = row
@@ -392,7 +394,7 @@ impl ApplicationWindow {
             if let (Some(trace_id), Some(reason)) = (row.trace_id.as_deref(), decision) {
                 let class = if row.signal == "logs" {
                     RetentionClass::TraceLog(trace_id.to_owned())
-                } else if is_application_execution(&row) {
+                } else if is_application_execution(&row, &self.sources) {
                     RetentionClass::Root(trace_id.to_owned())
                 } else {
                     RetentionClass::Dependency(trace_id.to_owned())
@@ -624,58 +626,65 @@ struct ApplicationSummaryBody<'a> {
     telemetry_loss_observed: bool,
 }
 
-pub fn is_application_row(row: &TelemetryRow) -> bool {
+pub fn is_application_row(row: &TelemetryRow, sources: &[ApplicationSource]) -> bool {
     if !matches!(row.signal.as_str(), "logs" | "traces") {
         return false;
     }
-    onboarded_source(row)
+    onboarded_source(row, sources)
         && json_object(&row.resource_json)
             .get("infra.telemetry.type")
             .and_then(Value::as_str)
             == Some("application")
 }
 
-fn onboarded_source(row: &TelemetryRow) -> bool {
-    matches!(
-        (
-            row.k8s_namespace.as_deref(),
-            row.service_namespace.as_deref(),
-            row.workload.as_deref(),
-            row.service_name.as_deref(),
-        ),
-        (
-            Some("nimmly"),
-            Some("nimmly"),
-            Some("nimmly-api"),
-            Some("nimmly-api")
-        ) | (
-            Some("nimmly"),
-            Some("nimmly"),
-            Some("nimmly-api-crawler-request-worker"),
-            Some("nimmly-api-crawler-request-worker-general"),
-        ) | (
-            Some("nimmly"),
-            Some("nimmly"),
-            Some("nimmly-api-crawler-request-worker-browser"),
-            Some("nimmly-api-crawler-request-worker-browser"),
-        ) | (
-            Some("nimmly"),
-            Some("nimmly"),
-            Some("nimmly-api-crawler-request-worker-firecrawl"),
-            Some("nimmly-api-crawler-request-worker-firecrawl"),
-        )
-    ) || matches!(
-        (
-            row.k8s_namespace.as_deref(),
-            row.service_namespace.as_deref(),
-            row.service_name.as_deref(),
-        ),
-        (
-            Some("nimmly"),
-            Some("nimmly"),
-            Some("nimmly-api-source-normalizer"),
-        )
-    ) && is_cronjob_workload(row.workload.as_deref(), "nimmly-api-source-normalizer")
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationSource {
+    k8s_namespace: String,
+    service_namespace: String,
+    service_name: String,
+    workload: Option<String>,
+    cronjob: Option<String>,
+}
+
+pub fn parse_sources(json: &str) -> anyhow::Result<Vec<ApplicationSource>> {
+    let sources: Vec<ApplicationSource> = serde_json::from_str(json)?;
+    for source in &sources {
+        let valid_name =
+            |value: &str| !value.is_empty() && value.trim() == value && !value.contains('*');
+        anyhow::ensure!(
+            valid_name(&source.k8s_namespace)
+                && valid_name(&source.service_namespace)
+                && valid_name(&source.service_name),
+            "application source identity fields must be nonempty exact names"
+        );
+        anyhow::ensure!(
+            source.workload.is_some() != source.cronjob.is_some(),
+            "application source needs exactly one workload or cronjob selector"
+        );
+        anyhow::ensure!(
+            source
+                .workload
+                .as_deref()
+                .or(source.cronjob.as_deref())
+                .is_some_and(valid_name),
+            "application workload selector must be an exact name"
+        );
+    }
+    Ok(sources)
+}
+
+fn onboarded_source(row: &TelemetryRow, sources: &[ApplicationSource]) -> bool {
+    sources.iter().any(|source| {
+        row.k8s_namespace.as_deref() == Some(source.k8s_namespace.as_str())
+            && row.service_namespace.as_deref() == Some(source.service_namespace.as_str())
+            && row.service_name.as_deref() == Some(source.service_name.as_str())
+            && match (&source.workload, &source.cronjob) {
+                (Some(workload), None) => row.workload.as_deref() == Some(workload.as_str()),
+                (None, Some(cronjob)) => is_cronjob_workload(row.workload.as_deref(), cronjob),
+                _ => false,
+            }
+    })
 }
 
 fn is_cronjob_workload(workload: Option<&str>, cronjob: &str) -> bool {
@@ -688,8 +697,8 @@ fn is_cronjob_workload(workload: Option<&str>, cronjob: &str) -> bool {
     (8..=10).contains(&timestamp.len()) && timestamp.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn is_application_execution(row: &TelemetryRow) -> bool {
-    is_application_row(row)
+fn is_application_execution(row: &TelemetryRow, sources: &[ApplicationSource]) -> bool {
+    is_application_row(row, sources)
         && json_object(&row.attributes_json).contains_key("infra.operation.kind")
 }
 
@@ -895,6 +904,15 @@ fn reason_rank(reason: &str) -> u8 {
 }
 
 #[cfg(test)]
+pub fn test_sources() -> Vec<ApplicationSource> {
+    parse_sources(r#"[
+      {"k8s_namespace":"acme","service_namespace":"acme","service_name":"acme-api","workload":"acme-api"},
+      {"k8s_namespace":"acme","service_namespace":"acme","service_name":"acme-api-crawler-request-worker-general","workload":"acme-api-crawler-request-worker"},
+      {"k8s_namespace":"acme","service_namespace":"acme","service_name":"acme-api-source-normalizer","cronjob":"acme-api-source-normalizer"}
+    ]"#).unwrap()
+}
+
+#[cfg(test)]
 mod tests {
     use serde_json::json;
 
@@ -933,10 +951,10 @@ mod tests {
             scope_json: "{}".into(),
             scope_schema_url: None,
             resource_schema_url: None,
-            service_name: Some("nimmly-api".into()),
-            service_namespace: Some("nimmly".into()),
-            k8s_namespace: Some("nimmly".into()),
-            workload: Some("nimmly-api".into()),
+            service_name: Some("acme-api".into()),
+            service_namespace: Some("acme".into()),
+            k8s_namespace: Some("acme".into()),
+            workload: Some("acme-api".into()),
             node: Some("node-a".into()),
             body_json: (signal == "logs").then(|| json!("request failed").to_string()),
             attributes_json: json!({
@@ -947,16 +965,37 @@ mod tests {
             .to_string(),
             resource_json: json!({
                 "infra.telemetry.type": "application",
-                "service.namespace": "nimmly",
-                "service.name": "nimmly-api"
+                "service.namespace": "acme",
+                "service.name": "acme-api"
             })
             .to_string(),
         }
     }
 
     #[test]
-    fn aggregates_every_execution_before_sampling() {
+    fn sources_are_explicit_and_configuration_is_validated() {
+        let row = row("traces", "a", "success", 1);
+        assert!(!is_application_row(&row, &parse_sources("[]").unwrap()));
+        assert!(parse_sources("not json").is_err());
+        assert!(parse_sources(r#"[{"k8s_namespace":"acme","service_namespace":"acme","service_name":"api","workload":"*"}]"#).is_err());
+        assert!(parse_sources(r#"[{"k8s_namespace":"acme","service_namespace":"acme","service_name":"api","workload":"api","cronjob":"api"}]"#).is_err());
+        assert!(
+            parse_sources(
+                r#"[{"k8s_namespace":"acme","service_namespace":"acme","service_name":"api"}]"#
+            )
+            .is_err()
+        );
+        let mut wrong_workload = row.clone();
+        wrong_workload.workload = Some("acme-api-unreviewed".into());
+        assert!(!is_application_row(&wrong_workload, &test_sources()));
         let mut window = ApplicationWindow::default();
+        window.observe_traces(&[row]);
+        assert!(window.summary_rows().is_empty());
+    }
+
+    #[test]
+    fn aggregates_every_execution_before_sampling() {
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_traces(&[
             row("traces", "a", "success", 10),
             row("traces", "a", "success", 10),
@@ -980,7 +1019,7 @@ mod tests {
         let mut second = row("traces", "second", "success", 20);
         second.span_id = first.span_id.clone();
 
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_traces(&[first, second]);
 
         let body: Value =
@@ -995,8 +1034,8 @@ mod tests {
         api.span_id = Some("aaaaaaaaaaaaaaaa".into());
         let mut worker = row("traces", "shared", "success", 20);
         worker.span_id = Some("bbbbbbbbbbbbbbbb".into());
-        worker.service_name = Some("nimmly-api-crawler-request-worker-general".into());
-        worker.workload = Some("nimmly-api-crawler-request-worker".into());
+        worker.service_name = Some("acme-api-crawler-request-worker-general".into());
+        worker.workload = Some("acme-api-crawler-request-worker".into());
         worker.name = Some("process item".into());
         worker.attributes_json = json!({
             "infra.operation.kind": "crawler",
@@ -1004,7 +1043,7 @@ mod tests {
         })
         .to_string();
 
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_traces(&[api, worker]);
 
         assert_eq!(window.summary_rows().len(), 2);
@@ -1013,22 +1052,22 @@ mod tests {
     #[test]
     fn admits_only_the_reviewed_source_normalizer_cronjob_identity() {
         let mut normalizer = row("traces", "normalizer", "success", 10);
-        normalizer.service_name = Some("nimmly-api-source-normalizer".into());
-        normalizer.workload = Some("nimmly-api-source-normalizer-29814011".into());
-        assert!(is_application_row(&normalizer));
+        normalizer.service_name = Some("acme-api-source-normalizer".into());
+        normalizer.workload = Some("acme-api-source-normalizer-29814011".into());
+        assert!(is_application_row(&normalizer, &test_sources()));
 
-        normalizer.workload = Some("nimmly-api-source-normalizer-manual".into());
-        assert!(!is_application_row(&normalizer));
+        normalizer.workload = Some("acme-api-source-normalizer-manual".into());
+        assert!(!is_application_row(&normalizer, &test_sources()));
 
-        normalizer.workload = Some("nimmly-api-source-normalizer-29814011".into());
+        normalizer.workload = Some("acme-api-source-normalizer-29814011".into());
         normalizer.service_name = Some("unreviewed-service".into());
-        assert!(!is_application_row(&normalizer));
+        assert!(!is_application_row(&normalizer, &test_sources()));
     }
 
     #[test]
     fn an_error_log_keeps_its_trace_bundle_and_routine_logs_follow_that_decision() {
         let trace_id = "d";
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_logs(&[row("logs", trace_id, "error", 0)]);
         let root = row("traces", trace_id, "success", 10);
         let mut dependency = row("traces", trace_id, "success", 4);
@@ -1052,7 +1091,7 @@ mod tests {
 
     #[test]
     fn failures_and_slowest_successes_survive_but_ordinary_successes_are_bounded() {
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         let traces = (0..20)
             .map(|index| {
                 row(
@@ -1096,7 +1135,7 @@ mod tests {
         let failure_id = "ffffffffffffffffffffffffffffffff";
         traces.push(row("traces", failure_id, "error", 1));
 
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_traces(&traces);
         window.finish_decisions();
 
@@ -1107,13 +1146,16 @@ mod tests {
     fn non_application_rows_stay_on_the_ordinary_compaction_path() {
         let mut metric = row("metrics", "", "success", 0);
         metric.service_namespace = None;
-        assert!(!is_application_row(&metric));
-        assert!(is_application_row(&row("traces", "a", "success", 1)));
+        assert!(!is_application_row(&metric, &test_sources()));
+        assert!(is_application_row(
+            &row("traces", "a", "success", 1),
+            &test_sources()
+        ));
     }
 
     #[test]
     fn unsampled_rows_do_not_grow_the_retained_dedupe_set() {
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         for index in 0..1_000 {
             let unsampled = row("traces", &format!("{index:032x}"), "success", 1);
             assert!(window.retain(unsampled).is_none());
@@ -1124,16 +1166,16 @@ mod tests {
     #[test]
     fn application_marker_requires_an_onboarded_kubernetes_identity() {
         let application = row("traces", "a", "success", 1);
-        assert!(is_application_row(&application));
+        assert!(is_application_row(&application, &test_sources()));
 
         let mut spoofed = application.clone();
         spoofed.service_name = Some("arbitrary-service".into());
-        assert!(!is_application_row(&spoofed));
+        assert!(!is_application_row(&spoofed, &test_sources()));
 
         let mut wrong_namespace = application;
         wrong_namespace.k8s_namespace = Some("another-tenant".into());
         wrong_namespace.service_namespace = Some("another-tenant".into());
-        assert!(!is_application_row(&wrong_namespace));
+        assert!(!is_application_row(&wrong_namespace, &test_sources()));
     }
 
     #[test]
@@ -1148,7 +1190,7 @@ mod tests {
                 dependency
             })
             .collect::<Vec<_>>();
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_traces(&dependencies);
         window.observe_traces(std::slice::from_ref(&root));
         window.finish_decisions();
@@ -1175,7 +1217,7 @@ mod tests {
     fn a_correlated_error_without_its_root_keeps_trace_identity_and_is_partial() {
         let trace_id = "orphan";
         let log = row("logs", trace_id, "error", 0);
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_logs(std::slice::from_ref(&log));
         window.finish_decisions();
 
@@ -1189,7 +1231,7 @@ mod tests {
     fn excess_selected_logs_and_standalone_errors_do_not_grow_dedupe_state() {
         let trace_id = "selected";
         let root = row("traces", trace_id, "error", 1);
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_traces(std::slice::from_ref(&root));
         window.finish_decisions();
 
@@ -1234,7 +1276,7 @@ mod tests {
         execution.body_json = Some(json!("x".repeat(MAX_RETAINED_FIELD_BYTES + 1)).to_string());
         let mut log = row("logs", "large", "error", 0);
         log.body_json = Some(json!("x".repeat(MAX_RETAINED_FIELD_BYTES + 1)).to_string());
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_logs(std::slice::from_ref(&log));
         window.observe_traces(std::slice::from_ref(&execution));
         window.finish_decisions();
@@ -1271,7 +1313,7 @@ mod tests {
             "telemetry.sdk.dropped.records": 2
         })
         .to_string();
-        let mut window = ApplicationWindow::default();
+        let mut window = ApplicationWindow::with_period("", &test_sources());
         window.observe_traces(&[execution]);
 
         let body: Value =

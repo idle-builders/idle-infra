@@ -54,7 +54,7 @@ services:
       # Bootstrap an org and a machine user with a PAT written to a file. This
       # is how the console's service-user credential is obtained in reality,
       # so the test uses the same mechanism rather than a hand-made token.
-      ZITADEL_FIRSTINSTANCE_ORG_NAME: hyperidle
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: beacon
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: root
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: RootPassword1!
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"

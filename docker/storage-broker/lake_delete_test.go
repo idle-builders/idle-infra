@@ -75,7 +75,7 @@ func TestLakeDeleteObjectsValidTenantAndExactWorkspaceBatches(t *testing.T) {
 			}
 			s := lakeServerForTest(store, backend)
 			response := httptest.NewRecorder()
-			s.handleLakeS3(response, newLakeDeleteObjectsRequest("/nimmly-files?delete", test.scope, keys, false))
+			s.handleLakeS3(response, newLakeDeleteObjectsRequest("/acme-files?delete", test.scope, keys, false))
 
 			if response.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
@@ -85,10 +85,10 @@ func TestLakeDeleteObjectsValidTenantAndExactWorkspaceBatches(t *testing.T) {
 				t.Fatalf("unexpected result: %#v", result)
 			}
 			for _, key := range keys {
-				if store.objects[lakeMapKey("nimmly-files", key)].State != ObjectStateDeleted {
+				if store.objects[lakeMapKey("acme-files", key)].State != ObjectStateDeleted {
 					t.Fatalf("row %q was not marked deleted", key)
 				}
-				if _, exists := backend.objects[lakeMapKey("nimmly-files", key)]; exists {
+				if _, exists := backend.objects[lakeMapKey("acme-files", key)]; exists {
 					t.Fatalf("physical object %q remains", key)
 				}
 			}
@@ -114,16 +114,16 @@ func TestLakeDeleteObjectsRejectsMixedAuthorityWithoutEffects(t *testing.T) {
 			seedLakeDeleteObject(store, backend, test.second, keys[1])
 			s := lakeServerForTest(store, backend)
 			response := httptest.NewRecorder()
-			s.handleLakeS3(response, newLakeDeleteObjectsRequest("/nimmly-files/?delete", test.requester, keys, false))
+			s.handleLakeS3(response, newLakeDeleteObjectsRequest("/acme-files/?delete", test.requester, keys, false))
 
 			if response.Code != http.StatusNotFound || backend.deleteCalls != 0 {
 				t.Fatalf("status=%d backend calls=%d body=%s", response.Code, backend.deleteCalls, response.Body.String())
 			}
 			for _, key := range keys {
-				if store.objects[lakeMapKey("nimmly-files", key)].State != ObjectStateActive {
+				if store.objects[lakeMapKey("acme-files", key)].State != ObjectStateActive {
 					t.Fatalf("unauthorized batch changed %q", key)
 				}
-				if _, exists := backend.objects[lakeMapKey("nimmly-files", key)]; !exists {
+				if _, exists := backend.objects[lakeMapKey("acme-files", key)]; !exists {
 					t.Fatalf("unauthorized batch deleted %q", key)
 				}
 			}
@@ -141,17 +141,17 @@ func TestLakeDeleteObjectsUnknownReservedAndDeletedRows(t *testing.T) {
 			seedLakeDeleteObject(store, backend, TenantStorageScope(), activeKey)
 			if state != "" {
 				seedLakeDeleteObject(store, backend, TenantStorageScope(), unavailableKey)
-				object := store.objects[lakeMapKey("nimmly-files", unavailableKey)]
+				object := store.objects[lakeMapKey("acme-files", unavailableKey)]
 				object.State = state
-				store.objects[lakeMapKey("nimmly-files", unavailableKey)] = object
+				store.objects[lakeMapKey("acme-files", unavailableKey)] = object
 			}
 			s := lakeServerForTest(store, backend)
 			response := httptest.NewRecorder()
-			s.handleLakeS3(response, newLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(),
+			s.handleLakeS3(response, newLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(),
 				[]string{activeKey, unavailableKey}, false))
 
 			if response.Code != http.StatusNotFound || backend.deleteCalls != 0 ||
-				store.objects[lakeMapKey("nimmly-files", activeKey)].State != ObjectStateActive {
+				store.objects[lakeMapKey("acme-files", activeKey)].State != ObjectStateActive {
 				t.Fatalf("unavailable batch had effects: status=%d calls=%d", response.Code, backend.deleteCalls)
 			}
 		})
@@ -161,15 +161,15 @@ func TestLakeDeleteObjectsUnknownReservedAndDeletedRows(t *testing.T) {
 	reservedBackend := newLakeMemoryBackend()
 	reservedKey := "ducklake/main/delete/reserved.parquet"
 	seedLakeDeleteObject(reservedStore, reservedBackend, TenantStorageScope(), reservedKey)
-	reserved := reservedStore.objects[lakeMapKey("nimmly-files", reservedKey)]
+	reserved := reservedStore.objects[lakeMapKey("acme-files", reservedKey)]
 	reserved.State = ObjectStateReserved
-	reservedStore.objects[lakeMapKey("nimmly-files", reservedKey)] = reserved
+	reservedStore.objects[lakeMapKey("acme-files", reservedKey)] = reserved
 	reservedServer := lakeServerForTest(reservedStore, reservedBackend)
 	reservedResponse := httptest.NewRecorder()
-	reservedServer.handleLakeS3(reservedResponse, newLakeDeleteObjectsRequest("/nimmly-files?delete",
+	reservedServer.handleLakeS3(reservedResponse, newLakeDeleteObjectsRequest("/acme-files?delete",
 		TenantStorageScope(), []string{reservedKey}, false))
 	if reservedResponse.Code != http.StatusOK || reservedBackend.deleteCalls != 1 ||
-		reservedStore.objects[lakeMapKey("nimmly-files", reservedKey)].State != ObjectStateDeleted {
+		reservedStore.objects[lakeMapKey("acme-files", reservedKey)].State != ObjectStateDeleted {
 		t.Fatalf("reserved cleanup = status %d calls %d", reservedResponse.Code, reservedBackend.deleteCalls)
 	}
 
@@ -177,12 +177,12 @@ func TestLakeDeleteObjectsUnknownReservedAndDeletedRows(t *testing.T) {
 	backend := newLakeMemoryBackend()
 	key := "ducklake/main/delete/retry.parquet"
 	seedLakeDeleteObject(store, backend, TenantStorageScope(), key)
-	object := store.objects[lakeMapKey("nimmly-files", key)]
+	object := store.objects[lakeMapKey("acme-files", key)]
 	object.State = ObjectStateDeleted
-	store.objects[lakeMapKey("nimmly-files", key)] = object
+	store.objects[lakeMapKey("acme-files", key)] = object
 	s := lakeServerForTest(store, backend)
 	response := httptest.NewRecorder()
-	s.handleLakeS3(response, newLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(), []string{key}, false))
+	s.handleLakeS3(response, newLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(), []string{key}, false))
 	if response.Code != http.StatusOK || backend.deleteCalls != 1 {
 		t.Fatalf("deleted retry status=%d calls=%d", response.Code, backend.deleteCalls)
 	}
@@ -198,13 +198,13 @@ func TestLakeDeleteObjectsAuthenticationAndAuthorityDenials(t *testing.T) {
 		{"missing token", func(r *http.Request, _ *server) { r.Header.Del("x-amz-security-token") }, http.StatusUnauthorized},
 		{"invalid token", func(_ *http.Request, s *server) { s.appAuth = rejectingReviewer{} }, http.StatusUnauthorized},
 		{"mismatched token namespace", func(_ *http.Request, s *server) {
-			s.appAuth = fixedReviewer{namespace: "ambrovia", account: "transformation-storage-authority"}
+			s.appAuth = fixedReviewer{namespace: "atlas", account: "transformation-storage-authority"}
 		}, http.StatusForbidden},
 		{"invalid key id", func(r *http.Request, _ *server) {
 			r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=admin/20260908/us-east-1/s3/aws4_request, Signature=ignored")
 		}, http.StatusForbidden},
 		{"unapproved service account", func(_ *http.Request, s *server) {
-			s.appAuth = fixedReviewer{namespace: "nimmly", account: "default"}
+			s.appAuth = fixedReviewer{namespace: "acme", account: "default"}
 		}, http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -212,12 +212,12 @@ func TestLakeDeleteObjectsAuthenticationAndAuthorityDenials(t *testing.T) {
 			backend := newLakeMemoryBackend()
 			seedLakeDeleteObject(store, backend, TenantStorageScope(), key)
 			s := lakeServerForTest(store, backend)
-			request := newLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(), []string{key}, false)
+			request := newLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(), []string{key}, false)
 			test.mutate(request, s)
 			response := httptest.NewRecorder()
 			s.handleLakeS3(response, request)
 			if response.Code != test.want || backend.deleteCalls != 0 ||
-				store.objects[lakeMapKey("nimmly-files", key)].State != ObjectStateActive {
+				store.objects[lakeMapKey("acme-files", key)].State != ObjectStateActive {
 				t.Fatalf("status=%d want=%d calls=%d", response.Code, test.want, backend.deleteCalls)
 			}
 		})
@@ -252,7 +252,7 @@ func TestLakeDeleteObjectsRejectsMalformedRequests(t *testing.T) {
 			store := newLakeMemoryStore()
 			backend := newLakeMemoryBackend()
 			s := lakeServerForTest(store, backend)
-			request := newRawLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(), []byte(test.body))
+			request := newRawLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(), []byte(test.body))
 			if test.mutate != nil {
 				test.mutate(request)
 			}
@@ -271,7 +271,7 @@ func TestLakeDeleteObjectsEnforcesCountAndBodyLimits(t *testing.T) {
 	for index := range keys {
 		keys[index] = fmt.Sprintf("ducklake/main/delete/%04d.parquet", index)
 	}
-	maximumRequest := newLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(),
+	maximumRequest := newLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(),
 		keys[:maxLakeDeleteObjects], false)
 	maximumBody, err := io.ReadAll(maximumRequest.Body)
 	if err != nil {
@@ -285,13 +285,13 @@ func TestLakeDeleteObjectsEnforcesCountAndBodyLimits(t *testing.T) {
 	backend := newLakeMemoryBackend()
 	s := lakeServerForTest(store, backend)
 	overCount := httptest.NewRecorder()
-	s.handleLakeS3(overCount, newLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(), keys, false))
+	s.handleLakeS3(overCount, newLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(), keys, false))
 	if overCount.Code != http.StatusBadRequest || store.deleteCalls != 0 || backend.deleteCalls != 0 {
 		t.Fatalf("over-count status=%d store=%d backend=%d", overCount.Code, store.deleteCalls, backend.deleteCalls)
 	}
 
 	oversized := bytes.Repeat([]byte("x"), maxLakeDeleteBodyBytes+1)
-	overBodyRequest := newRawLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(), oversized)
+	overBodyRequest := newRawLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(), oversized)
 	overBody := httptest.NewRecorder()
 	s.handleLakeS3(overBody, overBodyRequest)
 	if overBody.Code != http.StatusRequestEntityTooLarge || store.deleteCalls != 0 || backend.deleteCalls != 0 {
@@ -313,7 +313,7 @@ func TestLakeDeleteObjectsRetriesCompleteAndPartialResults(t *testing.T) {
 			}
 			s := lakeServerForTest(store, backend)
 			first := httptest.NewRecorder()
-			s.handleLakeS3(first, newLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(), keys, false))
+			s.handleLakeS3(first, newLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(), keys, false))
 			if first.Code != http.StatusOK {
 				t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
 			}
@@ -323,7 +323,7 @@ func TestLakeDeleteObjectsRetriesCompleteAndPartialResults(t *testing.T) {
 			}
 			backend.deleteErrors = nil
 			second := httptest.NewRecorder()
-			s.handleLakeS3(second, newLakeDeleteObjectsRequest("/nimmly-files?delete", TenantStorageScope(), keys, false))
+			s.handleLakeS3(second, newLakeDeleteObjectsRequest("/acme-files?delete", TenantStorageScope(), keys, false))
 			secondResult := decodeLakeDeleteResult(t, second)
 			if second.Code != http.StatusOK || len(secondResult.Deleted) != 2 || len(secondResult.Errors) != 0 ||
 				backend.deleteCalls != 4 {
@@ -338,7 +338,7 @@ func TestLakeDeleteObjectsQuietResponseAndConcurrentReservation(t *testing.T) {
 	backend := newLakeMemoryBackend()
 	key := "ducklake/main/delete/race.parquet"
 	seedLakeDeleteObject(store, backend, WorkspaceStorageScope(workspaceA), key)
-	object := store.objects[lakeMapKey("nimmly-files", key)]
+	object := store.objects[lakeMapKey("acme-files", key)]
 
 	start := make(chan struct{})
 	var wait sync.WaitGroup
@@ -347,8 +347,8 @@ func TestLakeDeleteObjectsQuietResponseAndConcurrentReservation(t *testing.T) {
 	go func() {
 		defer wait.Done()
 		<-start
-		_, deleteErr = store.DeleteLakeObjects(context.Background(), "nimmly", WorkspaceStorageScope(workspaceA),
-			"nimmly-files", []string{key}, time.Now())
+		_, deleteErr = store.DeleteLakeObjects(context.Background(), "acme", WorkspaceStorageScope(workspaceA),
+			"acme-files", []string{key}, time.Now())
 	}()
 	go func() {
 		defer wait.Done()
@@ -362,14 +362,14 @@ func TestLakeDeleteObjectsQuietResponseAndConcurrentReservation(t *testing.T) {
 	close(start)
 	wait.Wait()
 	if deleteErr != nil || (reserveErr != nil && !errors.Is(reserveErr, ErrGovernedConflict)) ||
-		store.objects[lakeMapKey("nimmly-files", key)].State != ObjectStateDeleted {
+		store.objects[lakeMapKey("acme-files", key)].State != ObjectStateDeleted {
 		t.Fatalf("delete=%v reserve=%v state=%s", deleteErr, reserveErr,
-			store.objects[lakeMapKey("nimmly-files", key)].State)
+			store.objects[lakeMapKey("acme-files", key)].State)
 	}
 
 	s := lakeServerForTest(store, backend)
 	response := httptest.NewRecorder()
-	s.handleLakeS3(response, newLakeDeleteObjectsRequest("/nimmly-files?delete", WorkspaceStorageScope(workspaceA), []string{key}, true))
+	s.handleLakeS3(response, newLakeDeleteObjectsRequest("/acme-files?delete", WorkspaceStorageScope(workspaceA), []string{key}, true))
 	result := decodeLakeDeleteResult(t, response)
 	if response.Code != http.StatusOK || len(result.Deleted) != 0 || len(result.Errors) != 0 {
 		t.Fatalf("quiet response status=%d result=%#v", response.Code, result)

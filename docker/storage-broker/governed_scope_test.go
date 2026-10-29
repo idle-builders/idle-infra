@@ -12,10 +12,10 @@ const (
 
 func TestValidateGrantObjectsKeepsWorkspaceRowsClosed(t *testing.T) {
 	grantScope := WorkspaceStorageScope(workspaceA)
-	tenantObject := governedObjectForTest("nimmly", TenantStorageScope())
-	workspaceObject := governedObjectForTest("nimmly", WorkspaceStorageScope(workspaceA))
+	tenantObject := governedObjectForTest("acme", TenantStorageScope())
+	workspaceObject := governedObjectForTest("acme", WorkspaceStorageScope(workspaceA))
 
-	if err := validateGrantObjects("nimmly", grantScope, []GovernedObject{tenantObject, workspaceObject}); err != nil {
+	if err := validateGrantObjects("acme", grantScope, []GovernedObject{tenantObject, workspaceObject}); err != nil {
 		t.Fatalf("validateGrantObjects() error = %v", err)
 	}
 
@@ -23,17 +23,17 @@ func TestValidateGrantObjectsKeepsWorkspaceRowsClosed(t *testing.T) {
 		name   string
 		object GovernedObject
 	}{
-		{"other workspace", governedObjectForTest("nimmly", WorkspaceStorageScope(workspaceB))},
-		{"other tenant", governedObjectForTest("ambrovia", TenantStorageScope())},
+		{"other workspace", governedObjectForTest("acme", WorkspaceStorageScope(workspaceB))},
+		{"other tenant", governedObjectForTest("atlas", TenantStorageScope())},
 		{"inactive", func() GovernedObject {
-			object := governedObjectForTest("nimmly", WorkspaceStorageScope(workspaceA))
+			object := governedObjectForTest("acme", WorkspaceStorageScope(workspaceA))
 			object.State = ObjectStateReserved
 			return object
 		}()},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := validateGrantObjects("nimmly", grantScope, []GovernedObject{test.object}); err == nil {
+			if err := validateGrantObjects("acme", grantScope, []GovernedObject{test.object}); err == nil {
 				t.Fatal("validateGrantObjects() unexpectedly accepted incompatible object")
 			}
 		})
@@ -41,8 +41,8 @@ func TestValidateGrantObjectsKeepsWorkspaceRowsClosed(t *testing.T) {
 }
 
 func TestValidateGrantObjectsTenantScopeRejectsWorkspaceRows(t *testing.T) {
-	if err := validateGrantObjects("nimmly", TenantStorageScope(), []GovernedObject{
-		governedObjectForTest("nimmly", WorkspaceStorageScope(workspaceA)),
+	if err := validateGrantObjects("acme", TenantStorageScope(), []GovernedObject{
+		governedObjectForTest("acme", WorkspaceStorageScope(workspaceA)),
 	}); err == nil {
 		t.Fatal("validateGrantObjects() accepted a workspace object for tenant-public execution")
 	}
@@ -51,16 +51,16 @@ func TestValidateGrantObjectsTenantScopeRejectsWorkspaceRows(t *testing.T) {
 func TestValidateGrantObjectsBoundsClosedReadSet(t *testing.T) {
 	objects := make([]GovernedObject, maxGrantReadableObjects+1)
 	for index := range objects {
-		objects[index] = governedObjectForTest("nimmly", TenantStorageScope())
+		objects[index] = governedObjectForTest("acme", TenantStorageScope())
 	}
-	if err := validateGrantObjects("nimmly", TenantStorageScope(), objects); err == nil {
+	if err := validateGrantObjects("acme", TenantStorageScope(), objects); err == nil {
 		t.Fatal("validateGrantObjects() accepted more than the maximum readable objects")
 	}
 }
 
 func TestValidateOutputInheritsGrantScopeAndClass(t *testing.T) {
 	grant := ExecutionGrant{
-		Tenant:                  "nimmly",
+		Tenant:                  "acme",
 		Scope:                   WorkspaceStorageScope(workspaceA),
 		WritableArtifactClasses: []ArtifactClass{ArtifactSandboxRelation},
 	}
@@ -78,7 +78,7 @@ func TestValidateOutputInheritsGrantScopeAndClass(t *testing.T) {
 func TestValidateIssueGrantInputAllowsReadOnlyGrant(t *testing.T) {
 	now := time.Now().UTC()
 	input := IssueGrantInput{
-		Tenant:               "nimmly",
+		Tenant:               "acme",
 		Scope:                WorkspaceStorageScope(workspaceA),
 		ExecutionID:          "33333333-3333-4333-8333-333333333333",
 		ReadableObjectIDs:    []string{"44444444-4444-4444-8444-444444444444"},

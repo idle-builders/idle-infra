@@ -53,14 +53,14 @@ run_psql() {
   for attempt in 1 2 3 4; do
     : >"$output_file"
     if [ -n "${STORAGE_BROKER_TEST_DATABASE_URL:-}" ]; then
-      if psql "$STORAGE_BROKER_TEST_DATABASE_URL" "$@" -f "$query_file" >"$output_file"; then
+      if psql "$STORAGE_BROKER_TEST_DATABASE_URL" "$@" -v tenant="$TENANT_NS" -v physical_bucket="$DUCKLAKE_BUCKET" -f "$query_file" >"$output_file"; then
         cat "$output_file"
         return 0
       else
         status=$?
       fi
     else
-      if psql "$@" -f "$query_file" >"$output_file"; then
+      if psql "$@" -v tenant="$TENANT_NS" -v physical_bucket="$DUCKLAKE_BUCKET" -f "$query_file" >"$output_file"; then
         cat "$output_file"
         return 0
       else
@@ -96,9 +96,9 @@ SELECT physical_key,
          ELSE 'workspace-' || workspace_id::text
        END
 FROM storage_broker.storage_objects
-WHERE tenant_id = 'nimmly'
+WHERE tenant_id = :'tenant'
   AND artifact_class = 'ducklake_data'
-  AND physical_bucket = 'nimmly-files'
+  AND physical_bucket = :'physical_bucket'
   AND physical_key LIKE :'prefix' || '%'
   AND state = 'active';
 SQL
@@ -164,9 +164,9 @@ SELECT
         OR (:'expected_kind' = 'workspace' AND workspace_id::text <> :'expected_workspace'))
   )
 FROM storage_broker.storage_objects
-WHERE tenant_id = 'nimmly'
+WHERE tenant_id = :'tenant'
   AND artifact_class = 'ducklake_data'
-  AND physical_bucket = 'nimmly-files'
+  AND physical_bucket = :'physical_bucket'
   AND physical_key LIKE :'prefix' || '%';
 SQL
 )"
@@ -200,9 +200,9 @@ remaining_active="$(
   run_psql -At -v ON_ERROR_STOP=1 -v prefix="$DUCKLAKE_DATA_PREFIX" <<'SQL'
 SELECT count(*)
 FROM storage_broker.storage_objects
-WHERE tenant_id = 'nimmly'
+WHERE tenant_id = :'tenant'
   AND artifact_class = 'ducklake_data'
-  AND physical_bucket = 'nimmly-files'
+  AND physical_bucket = :'physical_bucket'
   AND physical_key LIKE :'prefix' || '%'
   AND state = 'active';
 SQL

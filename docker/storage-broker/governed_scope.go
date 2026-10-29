@@ -119,8 +119,8 @@ type ExecutionGrant struct {
 // MarshalJSON is the grant's wire contract, whichever path built the value
 // (fresh issue, idempotent replay from Postgres, or a test double).
 // @lore A nil slice encodes as null, which clients typed as arrays reject: a
-// read-only grant has no output classes, and that null failed every nimmly
-// programmed transformation and publication. Empty lists always encode as [].
+// read-only grant has no output classes. Clients expect an empty list rather
+// than null for transformations and publications. Empty lists always encode as [].
 func (grant ExecutionGrant) MarshalJSON() ([]byte, error) {
 	type wireGrant ExecutionGrant
 	wire := struct {
