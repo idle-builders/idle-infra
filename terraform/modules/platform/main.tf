@@ -699,8 +699,7 @@ resource "helm_release" "postgresql" {
     value = var.pg_replication_password
   }
 
-  # Keep the database on the disk50 pool and ensure the pool exists before Helm
-  # is allowed to roll either StatefulSet.
+  # The deployment orders this module after its worker pool.
   depends_on = [
   ]
 }

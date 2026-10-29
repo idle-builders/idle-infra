@@ -33,8 +33,6 @@ resource "infomaniak_kaas" "cluster" {
 # Node pool — three-node baseline, autoscaling to four
 # =============================================================================
 
-# This is the sole worker pool. Pool 4911 and its three 20 GB nodes were drained
-# before this resource became the only declared worker capacity.
 resource "infomaniak_kaas_instance_pool" "workers_disk50" {
   public_cloud_id         = var.infomaniak_public_cloud_id
   public_cloud_project_id = var.infomaniak_project_id

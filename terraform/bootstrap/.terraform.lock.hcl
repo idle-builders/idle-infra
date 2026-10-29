@@ -5,7 +5,20 @@ provider "registry.opentofu.org/terraform-provider-openstack/openstack" {
   version     = "3.4.0"
   constraints = "~> 3.0"
   hashes = [
+    "h1:BB0YFgWM3KZTFY16pCYIzBqM4IpmDpT03m29VZEV2OU=",
+    "h1:CalEmc/Tn9xv1Xx2bX92EUdsF8z6Lldmb4/gwT5lSRw=",
+    "h1:DwSYyG1VNcEMUVY1GE9gbo2C3UPS8W2bFGk4WGVJnDY=",
+    "h1:FpAT7j83xnW4SkiUL6A0eXo9V1bYbABt1Eh467INBgk=",
+    "h1:FqJxdGUazKAfnZa11qT7h5PstlSTeE4xTKPUiWEgPmg=",
+    "h1:GgJWG1fXiDuRBcdDuzOWRW0TMW1Lx5N8O6+80v17LZc=",
+    "h1:HsPiqtbovSqh8jHAuMDR3tNeRNCOBEeHCvRbkgAHiaY=",
+    "h1:IwC35geJo3X96yLwIqcjSzoLL1Nt+6qJA6BoBMlGgMw=",
+    "h1:MVSoVvhjbu7s1pfYfsiYED8A++XfAoyOlSX1x9PW68E=",
     "h1:YMwKmPy+svf02jWyflqaPaQVX3eIXciwGeA8uwYgRBw=",
+    "h1:n1yIddr5lsLoYBhlfUmCwIYiCsynDkLvzAE98Tceo/A=",
+    "h1:nON9j1AYtfbOAmaml0lcPCfEQcb0OLB0K693HjdFggQ=",
+    "h1:rqRC/cidHw8t2vQb85cjMoWThGSCWnkEmTmmNSaGBVs=",
+    "h1:tzU+JfFe/RN+7swp0k5V5wUmuZtRNOjKX+spIGcRuKM=",
     "zh:11b3c88e24197a29b13cf5ab41771944bd16707b561645323e8cbb4f1da00b7b",
     "zh:1c3e89cf19118fc07d7b04257251fc9897e722c16e0a0df7b07fcd261f8c12e7",
     "zh:2dc60dbbbb822fbb1e7b17e3b89e3e6a7a8fe54a716d4477d2fa40f836c4de0f",
