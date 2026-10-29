@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
 FROM otel/opentelemetry-collector-builder:0.159.0 AS build
+# The pinned OCB image ships an older compiler; patch the generated runtime.
+ENV GOTOOLCHAIN=go1.26.10
 WORKDIR /src
 COPY manifest.yaml ./manifest.yaml
 COPY transfermanager ./transfermanager
