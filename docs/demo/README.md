@@ -15,8 +15,8 @@ Open <http://127.0.0.1:8765> in a browser. Capture **Overview**, then choose **T
 The shell includes a visible `demo` label. Current timestamps are generated at
 server startup, so restart before capturing a fresh set.
 
-Only Overview and Tenants are populated. Other views explicitly report that
-they are not set up in this preview. These fixtures illustrate the interface;
+Overview and Tenants are the screenshot fixture set. Other views are incomplete
+and explicitly report unavailable sources. These fixtures illustrate the interface;
 they do not verify upstream integrations or prove health of a live cluster.
 Runtime integration suites under `docker/infra-console/integration` retain that
 separate responsibility.
