@@ -312,3 +312,15 @@ variable "zitadel_masterkey" {
     error_message = "Zitadel masterkey must be exactly 32 characters."
   }
 }
+
+variable "application_telemetry_sources" {
+  description = "Explicit workload identities for optional bounded application execution summaries."
+  type = list(object({
+    k8s_namespace     = string
+    service_namespace = string
+    service_name      = string
+    workload          = optional(string)
+    cronjob           = optional(string)
+  }))
+  default = []
+}

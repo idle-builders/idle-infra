@@ -115,3 +115,22 @@ variable "apiserver_cidr" {
 variable "apiserver_port" {
   type = number
 }
+
+variable "application_telemetry_sources" {
+  description = "Exact application identities admitted to bounded execution summaries. Empty disables application summaries; OTLP network admission remains separately configured. Set before upgrading telemetry-data images."
+  type = list(object({
+    k8s_namespace     = string
+    service_namespace = string
+    service_name      = string
+    workload          = optional(string)
+    cronjob           = optional(string)
+  }))
+  default = []
+
+  validation {
+    condition = alltrue([for source in var.application_telemetry_sources :
+      (source.workload != null) != (source.cronjob != null)
+    ])
+    error_message = "Every application telemetry source needs exactly one workload or cronjob selector."
+  }
+}

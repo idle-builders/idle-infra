@@ -16,7 +16,7 @@
 # Usage:
 #   source scripts/env-from-keychain.sh   # materializes KUBECONFIG from Keychain
 #   [USER_TOKEN="<zitadel access token>"] \
-#   ./scripts/test-storage-broker.sh [tenant-namespace]      # default: ambrovia
+#   ./scripts/test-storage-broker.sh <tenant-namespace>      # required: deployment-owned namespace
 # =============================================================================
 set -euo pipefail
 
@@ -97,12 +97,12 @@ code=$(presign "garbage.token.value" "" '{"op":"get","key":"u/x/a"}')
 code=$(presign "$APP_TOKEN" "" '{"op":"get","key":"u/x/a"}')
 [ "$code" = 403 ] && ok "valid app, no user token (require_user_token) -> 403" || bad "no user token -> $code (want 403)"
 
-code=$(presign "$APP_TOKEN" "${USER_TOKEN:-}" '{"op":"get","key":"u/x/a","bucket":"nimmly-files"}')
+code=$(presign "$APP_TOKEN" "${USER_TOKEN:-}" '{"op":"get","key":"u/x/a","bucket":"acme-files"}')
 [ "$code" = 400 ] && ok "stray bucket field -> 400 (DisallowUnknownFields)" || bad "stray bucket -> $code (want 400)"
 
 # --- Service-scoped corpus/ path (credential-less crawler; NO user token) ----
-# Only nimmly carries a placeholder-free `corpus/` prefix with require_user_token=false.
-if [ "$NS" = nimmly ]; then
+# Enable only for a selected policy with a service-scoped `corpus/` prefix.
+if [ "${TEST_SERVICE_CORPUS:-false}" = true ]; then
   echo "==> Service-scoped corpus/ cases (no user token — the crawler identity)"
   CKEY="corpus/acctest/$(date +%s)-$$.txt"
 

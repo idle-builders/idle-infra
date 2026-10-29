@@ -52,14 +52,14 @@ func TestObservabilityEndpointPassesBoundedFilters(t *testing.T) {
 	srv := &Server{Telemetry: fake}
 	handler := api.HandlerFromMuxWithBaseURL(srv, http.NewServeMux(), "/v1")
 
-	code, body := get(t, handler, "/v1/observability?windowMinutes=30&namespace=nimmly&workload=worker&service=nimmly-api&limit=12")
+	code, body := get(t, handler, "/v1/observability?windowMinutes=30&namespace=acme&workload=worker&service=acme-api&limit=12")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %v", code, body)
 	}
 	if got := fake.query.To.Sub(fake.query.From); got != 30*time.Minute {
 		t.Errorf("window = %s, want 30m", got)
 	}
-	if fake.query.Namespace != "nimmly" || fake.query.Workload != "worker" || fake.query.Service != "nimmly-api" || fake.query.Limit != 12 {
+	if fake.query.Namespace != "acme" || fake.query.Workload != "worker" || fake.query.Service != "acme-api" || fake.query.Limit != 12 {
 		t.Errorf("query = %+v", fake.query)
 	}
 	coverage, ok := body["coverage"].([]any)

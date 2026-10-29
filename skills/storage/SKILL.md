@@ -56,7 +56,7 @@ the rule is skipped entirely, so a token-less request can never match
 
 `require_user_token` is a separate, blanket gate meaning "every request to this
 namespace must carry a user token". It is therefore **incompatible** with a
-namespace that also serves a service-scoped, credential-less path. Nimmly is
+namespace that also serves a service-scoped, credential-less path. A tenant can be
 exactly that shape: `require_user_token = false` so the token-less crawler can
 reach `corpus/`, which does not weaken `u/${sub}/` isolation at all.
 

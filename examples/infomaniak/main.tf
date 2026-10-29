@@ -198,15 +198,16 @@ resource "postgresql_default_privileges" "reader_future_tables" {
 }
 
 module "observability" {
-  count                   = var.observability_enabled ? 1 : 0
-  source                  = "../../terraform/modules/observability"
-  namespace               = module.platform.observability_namespace
-  collector_image         = var.otel_collector_image
-  compactor_image         = var.telemetry_data_image
-  ghcr_pull_secret_name   = module.platform.observability_pull_secret_name
-  collector_config        = file("${path.module}/../../docker/otel-collector/config.yaml")
-  apiserver_cidr          = var.apiserver_cidr
-  apiserver_port          = var.apiserver_port
-  otlp_ingress_namespaces = concat([module.platform.namespace], keys(var.tenants))
-  depends_on              = [module.tenant]
+  count                         = var.observability_enabled ? 1 : 0
+  source                        = "../../terraform/modules/observability"
+  namespace                     = module.platform.observability_namespace
+  collector_image               = var.otel_collector_image
+  compactor_image               = var.telemetry_data_image
+  ghcr_pull_secret_name         = module.platform.observability_pull_secret_name
+  collector_config              = file("${path.module}/../../docker/otel-collector/config.yaml")
+  apiserver_cidr                = var.apiserver_cidr
+  apiserver_port                = var.apiserver_port
+  otlp_ingress_namespaces       = concat([module.platform.namespace], keys(var.tenants))
+  application_telemetry_sources = var.application_telemetry_sources
+  depends_on                    = [module.tenant]
 }

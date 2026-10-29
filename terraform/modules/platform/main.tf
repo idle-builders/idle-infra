@@ -2098,12 +2098,12 @@ resource "kubernetes_pod_disruption_budget_v1" "zitadel" {
 # may only use hosts permitted by that namespace's platform.infra/allowed-hosts
 # annotation (set by the tenant module from var.allowed_ingress_domains). A host
 # is permitted if it equals an allowed domain or is a subdomain of one — so
-# "hyperidle.com" permits hyperidle.com, www.hyperidle.com, beta.hyperidle.com.
+# "beacon.example.com" permits beacon.example.com, www.beacon.example.com, beta.beacon.example.com.
 #
 # FAIL-CLOSED: if the annotation is missing/empty, or a host matches none of the
 # allowed domains, the Ingress is denied. This both supports the beta.<domain>
 # and main-<domain> schemes and prevents a tenant from claiming another tenant's
-# or infra's hostnames (e.g. id.nimmly.io).
+# or infra's hostnames (e.g. id.acme.example.com).
 #
 # Requires Kubernetes >= 1.30 (ValidatingAdmissionPolicy GA). Uses
 # kubernetes_manifest (no native provider resource type).

@@ -380,8 +380,8 @@ mod tests {
           "resourceLogs": [{
             "resource": {"attributes": [
               {"key":"service.name","value":{"stringValue":"api"}},
-              {"key":"k8s.namespace.name","value":{"stringValue":"nimmly"}},
-              {"key":"k8s.deployment.name","value":{"stringValue":"nimmly-api"}}
+              {"key":"k8s.namespace.name","value":{"stringValue":"acme"}},
+              {"key":"k8s.deployment.name","value":{"stringValue":"acme-api"}}
             ]},
             "scopeLogs": [{"logRecords": [{
               "timeUnixNano":"100", "severityNumber":17, "severityText":"ERROR",
@@ -393,7 +393,7 @@ mod tests {
         let rows = flatten("logs", payload).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].service_name.as_deref(), Some("api"));
-        assert_eq!(rows[0].workload.as_deref(), Some("nimmly-api"));
+        assert_eq!(rows[0].workload.as_deref(), Some("acme-api"));
         assert_eq!(rows[0].severity_number, Some(17));
         assert_eq!(rows[0].trace_id.as_deref(), Some("abc"));
         assert_eq!(rows[0].body_json.as_deref(), Some("\"failed\""));

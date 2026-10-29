@@ -18,7 +18,7 @@ func TestLakeBackendUsesStreamingSingleObjectS3Operations(t *testing.T) {
 	payload := []byte("streamed parquet bytes")
 	var putBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost && r.URL.Path != "/nimmly-files/ducklake/main/t/file.parquet" {
+		if r.Method != http.MethodPost && r.URL.Path != "/acme-files/ducklake/main/t/file.parquet" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		switch r.Method {
@@ -44,7 +44,7 @@ func TestLakeBackendUsesStreamingSingleObjectS3Operations(t *testing.T) {
 		case http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodPost:
-			if r.URL.Path != "/nimmly-files" || !r.URL.Query().Has("delete") {
+			if r.URL.Path != "/acme-files" || !r.URL.Query().Has("delete") {
 				t.Errorf("DeleteObjects target = %s?%s", r.URL.Path, r.URL.RawQuery)
 			}
 			body, _ := io.ReadAll(r.Body)
@@ -74,18 +74,18 @@ func TestLakeBackendUsesStreamingSingleObjectS3Operations(t *testing.T) {
 		S3AccessKey: "broker", S3SecretKey: "secret",
 	})
 	ctx := context.Background()
-	if err := backend.Put(ctx, "nimmly-files", "ducklake/main/t/file.parquet",
+	if err := backend.Put(ctx, "acme-files", "ducklake/main/t/file.parquet",
 		nonSeekableReader{Reader: bytes.NewReader(payload)}, int64(len(payload)), "application/vnd.apache.parquet"); err != nil {
 		t.Fatalf("streaming Put: %v", err)
 	}
 	if !bytes.Equal(putBody, payload) {
 		t.Fatalf("PUT body = %q", putBody)
 	}
-	metadata, err := backend.Head(ctx, "nimmly-files", "ducklake/main/t/file.parquet")
+	metadata, err := backend.Head(ctx, "acme-files", "ducklake/main/t/file.parquet")
 	if err != nil || metadata.ContentLength != int64(len(payload)) {
 		t.Fatalf("Head = %#v, %v", metadata, err)
 	}
-	metadata, err = backend.Get(ctx, "nimmly-files", "ducklake/main/t/file.parquet", "bytes=2-5")
+	metadata, err = backend.Get(ctx, "acme-files", "ducklake/main/t/file.parquet", "bytes=2-5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,10 +94,10 @@ func TestLakeBackendUsesStreamingSingleObjectS3Operations(t *testing.T) {
 	if err != nil || string(got) != string(payload[2:6]) || metadata.ContentRange != "bytes 2-5/22" {
 		t.Fatalf("Get = %q, %#v, %v", got, metadata, err)
 	}
-	if err := backend.Delete(ctx, "nimmly-files", "ducklake/main/t/file.parquet"); err != nil {
+	if err := backend.Delete(ctx, "acme-files", "ducklake/main/t/file.parquet"); err != nil {
 		t.Fatal(err)
 	}
-	outcomes, err := backend.DeleteObjects(ctx, "nimmly-files", []string{
+	outcomes, err := backend.DeleteObjects(ctx, "acme-files", []string{
 		"ducklake/main/t/a.parquet", "ducklake/main/t/b.parquet",
 	})
 	if err != nil || len(outcomes) != 2 || !outcomes[0].Deleted || outcomes[0].Key != "ducklake/main/t/a.parquet" ||

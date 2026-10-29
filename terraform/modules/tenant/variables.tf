@@ -79,7 +79,7 @@ variable "allowed_ingress_domains" {
     app.example.com, www.app.example.com, and beta.app.example.com. Written to the
     platform.infra/allowed-hosts namespace annotation and enforced (fail-closed)
     by the tenant-ingress-hostname ValidatingAdmissionPolicy. Must NOT include
-    domains owned by infra/other tenants (e.g. nimmly.io hosts the IdP).
+    domains owned by infra/other tenants (e.g. acme.example.com hosts the IdP).
   EOT
 
   validation {

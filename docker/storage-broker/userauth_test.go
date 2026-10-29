@@ -125,32 +125,32 @@ func readyVerifier(t *testing.T, issuer string) *UserVerifier {
 func TestUserVerifierUserTokenClients(t *testing.T) {
 	f := newFakeIssuer(t)
 	uv := readyVerifier(t, f.srv.URL)
-	pinned := []string{"nimmly-login"}
+	pinned := []string{"acme-login"}
 
 	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
 	unsigned := b64([]byte(`{"alg":"none","typ":"JWT"}`)) + "." +
-		b64(mustJSON(t, f.claims("user-1", "nimmly-login", nil))) + "."
+		b64(mustJSON(t, f.claims("user-1", "acme-login", nil))) + "."
 	f.active[unsigned] = "user-1"
 
 	f.active["opaque-token"] = "user-1"
-	nimmly := f.jwt(t, "user-1", "nimmly-login", nil, "user-1")
-	azpOnly := f.jwt(t, "user-1", "nimmly-login", map[string]any{"client_id": nil, "azp": "nimmly-login"}, "user-1")
-	other := f.jwt(t, "user-1", "ambrovia-web", nil, "user-1")
-	// Another client asking for nimmly's ids in aud must not pass.
-	otherWithAud := f.jwt(t, "user-1", "ambrovia-web", map[string]any{"aud": []string{"nimmly-login", "project-id"}}, "user-1")
-	otherWithAZP := f.jwt(t, "user-1", "ambrovia-web", map[string]any{"azp": "nimmly-login"}, "user-1")
-	noSubject := f.jwt(t, "user-1", "nimmly-login", map[string]any{"sub": nil}, "user-1")
-	noClient := f.jwt(t, "user-1", "nimmly-login", map[string]any{"client_id": nil}, "user-1")
-	idToken := f.jwt(t, "user-1", "nimmly-login", map[string]any{"at_hash": "x"}, "user-1")
-	revoked := f.jwt(t, "user-1", "nimmly-login", map[string]any{"jti": "revoked"}, "")
-	mismatched := f.jwt(t, "user-2", "nimmly-login", nil, "user-1")
-	expired := f.jwt(t, "user-1", "nimmly-login", map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}, "user-1")
-	wrongIssuer := f.jwt(t, "user-1", "nimmly-login", map[string]any{"iss": "https://elsewhere.example"}, "user-1")
-	foreignKey := f.sign(t, otherKey, "k1", f.claims("user-1", "nimmly-login", nil), "user-1")
-	unknownKid := f.sign(t, otherKey, "k2", f.claims("user-1", "nimmly-login", nil), "user-1")
+	acme := f.jwt(t, "user-1", "acme-login", nil, "user-1")
+	azpOnly := f.jwt(t, "user-1", "acme-login", map[string]any{"client_id": nil, "azp": "acme-login"}, "user-1")
+	other := f.jwt(t, "user-1", "atlas-web", nil, "user-1")
+	// Another client asking for acme's ids in aud must not pass.
+	otherWithAud := f.jwt(t, "user-1", "atlas-web", map[string]any{"aud": []string{"acme-login", "project-id"}}, "user-1")
+	otherWithAZP := f.jwt(t, "user-1", "atlas-web", map[string]any{"azp": "acme-login"}, "user-1")
+	noSubject := f.jwt(t, "user-1", "acme-login", map[string]any{"sub": nil}, "user-1")
+	noClient := f.jwt(t, "user-1", "acme-login", map[string]any{"client_id": nil}, "user-1")
+	idToken := f.jwt(t, "user-1", "acme-login", map[string]any{"at_hash": "x"}, "user-1")
+	revoked := f.jwt(t, "user-1", "acme-login", map[string]any{"jti": "revoked"}, "")
+	mismatched := f.jwt(t, "user-2", "acme-login", nil, "user-1")
+	expired := f.jwt(t, "user-1", "acme-login", map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}, "user-1")
+	wrongIssuer := f.jwt(t, "user-1", "acme-login", map[string]any{"iss": "https://elsewhere.example"}, "user-1")
+	foreignKey := f.sign(t, otherKey, "k1", f.claims("user-1", "acme-login", nil), "user-1")
+	unknownKid := f.sign(t, otherKey, "k2", f.claims("user-1", "acme-login", nil), "user-1")
 
 	cases := []struct {
 		name    string
@@ -160,7 +160,7 @@ func TestUserVerifierUserTokenClients(t *testing.T) {
 	}{
 		{"unpinned accepts opaque token", "opaque-token", nil, "user-1"},
 		{"unpinned accepts any audience", other, nil, "user-1"},
-		{"pinned accepts its client's token", nimmly, pinned, "user-1"},
+		{"pinned accepts its client's token", acme, pinned, "user-1"},
 		{"pinned accepts its client named only in azp", azpOnly, pinned, "user-1"},
 		{"pinned rejects another app's token", other, pinned, ""},
 		{"pinned rejects another app's token naming it in aud", otherWithAud, pinned, ""},
@@ -195,11 +195,11 @@ func TestUserVerifierUserTokenClients(t *testing.T) {
 
 func TestPolicyUserTokenClients(t *testing.T) {
 	p := testPolicy()
-	p.Namespaces["nimmly"] = NamespacePolicy{Bucket: "nimmly-files", UserTokenClients: []string{"a"}}
-	if got := p.UserTokenClients("nimmly"); len(got) != 1 || got[0] != "a" {
-		t.Fatalf("nimmly clients = %v", got)
+	p.Namespaces["acme"] = NamespacePolicy{Bucket: "acme-files", UserTokenClients: []string{"a"}}
+	if got := p.UserTokenClients("acme"); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("acme clients = %v", got)
 	}
-	if got := p.UserTokenClients("ambrovia"); got != nil {
+	if got := p.UserTokenClients("atlas"); got != nil {
 		t.Fatalf("unpinned namespace clients = %v, want nil", got)
 	}
 	if got := p.UserTokenClients("unknown"); got != nil {
@@ -209,10 +209,10 @@ func TestPolicyUserTokenClients(t *testing.T) {
 
 func TestLoadPolicyUserTokenClients(t *testing.T) {
 	cases := map[string]bool{
-		`{"namespaces":{"nimmly":{"bucket":"b","userTokenClients":["379428288789021199"]}}}`: true,
-		`{"namespaces":{"nimmly":{"bucket":"b"}}}`:                                           true,
-		`{"namespaces":{"nimmly":{"bucket":"b","userTokenClients":[""]}}}`:                   false,
-		`{"namespaces":{"nimmly":{"bucket":"b","userTokenClients":[" 3794 "]}}}`:             false,
+		`{"namespaces":{"acme":{"bucket":"b","userTokenClients":["379428288789021199"]}}}`: true,
+		`{"namespaces":{"acme":{"bucket":"b"}}}`:                                           true,
+		`{"namespaces":{"acme":{"bucket":"b","userTokenClients":[""]}}}`:                   false,
+		`{"namespaces":{"acme":{"bucket":"b","userTokenClients":[" 3794 "]}}}`:             false,
 	}
 	for payload, wantOK := range cases {
 		path := filepath.Join(t.TempDir(), "policy.json")

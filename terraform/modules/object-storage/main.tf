@@ -15,8 +15,8 @@
 #   blast-radius reduction, NOT a cryptographic boundary:
 #     - each app gets its OWN credential (revoke/rotate one without the others);
 #     - each app is told only its own bucket and must use only that;
-#     - within-app isolation stays app-layer (e.g. ambrovia's {projectId}/{sourceId}
-#       prefixes, nimmly's per-workspace prefixes).
+#     - within-app isolation stays app-layer (e.g. atlas's {projectId}/{sourceId}
+#       prefixes, acme's per-workspace prefixes).
 #   The TF state is AES-256-GCM encrypted, so a leaked app credential yields
 #   ciphertext only. Hard isolation = a separate OpenStack project per tenant —
 #   deliberately DEFERRED until a customer/contract requires provable isolation.

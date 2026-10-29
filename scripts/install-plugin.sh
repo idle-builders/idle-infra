@@ -3,8 +3,8 @@
 # scripts/install-plugin.sh — Register the infra skills with Claude and Codex
 # =============================================================================
 #
-# Makes the infra skills available from ANY repository on this device — nimmly,
-# hyperidle, ambrovia — by registering this checkout as a local plugin
+# Makes the infra skills available from ANY repository on this device — acme,
+# beacon, atlas — by registering this checkout as a local plugin
 # marketplace in both agents' configuration.
 #
 # The registration also records where this repo lives on this device, which is

@@ -41,7 +41,14 @@ async fn main() -> Result<()> {
     }
     let seal_delay = Duration::from_secs(env_u64("COMPACTION_SEAL_DELAY_SECONDS", 120)?);
     let raw_retention = Duration::from_secs(env_u64("RAW_RETENTION_SECONDS", 7200)?);
-    let report = compact(store, seal_delay, raw_retention).await?;
+    let sources_json = match env::var("APPLICATION_TELEMETRY_SOURCES_JSON") {
+        Ok(value) => value,
+        Err(env::VarError::NotPresent) => "[]".to_owned(),
+        Err(error) => return Err(error).context("read APPLICATION_TELEMETRY_SOURCES_JSON"),
+    };
+    let sources = application::parse_sources(&sources_json)
+        .context("parse APPLICATION_TELEMETRY_SOURCES_JSON")?;
+    let report = compact(store, seal_delay, raw_retention, &sources).await?;
     println!("{}", serde_json::to_string(&report)?);
     Ok(())
 }
@@ -66,6 +73,7 @@ async fn compact(
     store: Arc<dyn ObjectStore>,
     seal_delay: Duration,
     raw_retention: Duration,
+    sources: &[application::ApplicationSource],
 ) -> Result<RunReport> {
     let started = Utc::now();
     let run_id = Uuid::new_v4().simple().to_string();
@@ -86,7 +94,15 @@ async fn compact(
 
     // Application summaries and sampled execution bundles must be durable
     // before the ordinary signal path can make raw objects cleanup-eligible.
-    compact_applications(store.as_ref(), started, seal_delay, &run_id, &mut report).await?;
+    compact_applications(
+        store.as_ref(),
+        started,
+        seal_delay,
+        &run_id,
+        &mut report,
+        sources,
+    )
+    .await?;
 
     for signal in SIGNALS {
         let prefix = Path::from(format!("raw/v1/{signal}"));
@@ -132,7 +148,7 @@ async fn compact(
             for (part_index, object) in pending.iter().enumerate() {
                 let mut rows = load_rows(store.as_ref(), signal, object).await?;
                 if matches!(signal, "logs" | "traces") {
-                    rows.retain(|row| !application::is_application_row(row));
+                    rows.retain(|row| !application::is_application_row(row, sources));
                 }
                 let source = SourceObject {
                     key: object.location.to_string(),
@@ -200,6 +216,7 @@ async fn compact_applications(
     seal_delay: Duration,
     run_id: &str,
     report: &mut RunReport,
+    sources: &[application::ApplicationSource],
 ) -> Result<()> {
     let mut periods: BTreeMap<String, Vec<(String, ObjectMeta)>> = BTreeMap::new();
     for signal in ["logs", "traces"] {
@@ -254,7 +271,7 @@ async fn compact_applications(
         } else {
             pending.clone()
         };
-        let mut window = application::ApplicationWindow::with_period(&period);
+        let mut window = application::ApplicationWindow::with_period(&period, sources);
         if manifest.generation > 0 && !can_rebuild {
             window.mark_cross_generation_partial();
         }
@@ -485,9 +502,14 @@ mod tests {
             .await
             .unwrap();
 
-        let report = compact(store.clone(), Duration::ZERO, Duration::ZERO)
-            .await
-            .unwrap();
+        let report = compact(
+            store.clone(),
+            Duration::ZERO,
+            Duration::ZERO,
+            &application::test_sources(),
+        )
+        .await
+        .unwrap();
         assert_eq!(report.output_objects, 2);
         assert_eq!(report.rows, 2);
 
@@ -510,9 +532,14 @@ mod tests {
             Err(object_store::Error::NotFound { .. })
         ));
 
-        let second = compact(store.clone(), Duration::ZERO, Duration::ZERO)
-            .await
-            .unwrap();
+        let second = compact(
+            store.clone(),
+            Duration::ZERO,
+            Duration::ZERO,
+            &application::test_sources(),
+        )
+        .await
+        .unwrap();
         assert_eq!(second.output_objects, 0);
         let reports = store
             .list(Some(&Path::from("reports/v1")))
@@ -523,10 +550,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_application_sources_preserve_marked_rows_on_ordinary_path() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let payload = br#"{"resourceLogs":[{"resource":{"attributes":[{"key":"infra.telemetry.type","value":{"stringValue":"application"}},{"key":"service.namespace","value":{"stringValue":"acme"}},{"key":"service.name","value":{"stringValue":"acme-api"}},{"key":"k8s.namespace.name","value":{"stringValue":"acme"}},{"key":"k8s.deployment.name","value":{"stringValue":"acme-api"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1010000000","severityNumber":17,"severityText":"ERROR","body":{"stringValue":"request failed"}}]}]}]}"#;
+        let raw = Path::from("raw/v1/logs/node-a/date=2026-08-25/hour=12/minute=03/logs.json");
+        store
+            .put(&raw, Bytes::copy_from_slice(payload).into())
+            .await
+            .unwrap();
+        let report = compact(store.clone(), Duration::ZERO, Duration::ZERO, &[])
+            .await
+            .unwrap();
+        assert_eq!(report.rows, 1);
+        let ordinary = read_manifest(
+            store.as_ref(),
+            &Path::from("manifests/v1/logs/date=2026-08-25/hour=12/minute=03.json"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(ordinary.total_rows, 1);
+        assert!(matches!(
+            store.get(&raw).await,
+            Err(object_store::Error::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
     async fn application_compaction_commits_summary_and_bundle_before_raw_cleanup() {
         let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-        let trace = br#"{"resourceSpans":[{"resource":{"attributes":[{"key":"infra.telemetry.type","value":{"stringValue":"application"}},{"key":"service.namespace","value":{"stringValue":"nimmly"}},{"key":"service.name","value":{"stringValue":"nimmly-api"}},{"key":"k8s.namespace.name","value":{"stringValue":"nimmly"}},{"key":"k8s.deployment.name","value":{"stringValue":"nimmly-api"}}]},"scopeSpans":[{"spans":[{"traceId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","spanId":"bbbbbbbbbbbbbbbb","name":"GET /health","kind":2,"startTimeUnixNano":"1000000000","endTimeUnixNano":"1010000000","status":{"code":2},"attributes":[{"key":"infra.operation.kind","value":{"stringValue":"http"}},{"key":"infra.execution.outcome","value":{"stringValue":"error"}}]}]}]}]}"#;
-        let log = br#"{"resourceLogs":[{"resource":{"attributes":[{"key":"infra.telemetry.type","value":{"stringValue":"application"}},{"key":"service.namespace","value":{"stringValue":"nimmly"}},{"key":"service.name","value":{"stringValue":"nimmly-api"}},{"key":"k8s.namespace.name","value":{"stringValue":"nimmly"}},{"key":"k8s.deployment.name","value":{"stringValue":"nimmly-api"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1010000000","severityNumber":17,"severityText":"ERROR","traceId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","spanId":"bbbbbbbbbbbbbbbb","body":{"stringValue":"request failed"},"attributes":[{"key":"infra.operation.kind","value":{"stringValue":"http"}},{"key":"infra.execution.outcome","value":{"stringValue":"error"}}]}]}]}]}"#;
+        let trace = br#"{"resourceSpans":[{"resource":{"attributes":[{"key":"infra.telemetry.type","value":{"stringValue":"application"}},{"key":"service.namespace","value":{"stringValue":"acme"}},{"key":"service.name","value":{"stringValue":"acme-api"}},{"key":"k8s.namespace.name","value":{"stringValue":"acme"}},{"key":"k8s.deployment.name","value":{"stringValue":"acme-api"}}]},"scopeSpans":[{"spans":[{"traceId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","spanId":"bbbbbbbbbbbbbbbb","name":"GET /health","kind":2,"startTimeUnixNano":"1000000000","endTimeUnixNano":"1010000000","status":{"code":2},"attributes":[{"key":"infra.operation.kind","value":{"stringValue":"http"}},{"key":"infra.execution.outcome","value":{"stringValue":"error"}}]}]}]}]}"#;
+        let log = br#"{"resourceLogs":[{"resource":{"attributes":[{"key":"infra.telemetry.type","value":{"stringValue":"application"}},{"key":"service.namespace","value":{"stringValue":"acme"}},{"key":"service.name","value":{"stringValue":"acme-api"}},{"key":"k8s.namespace.name","value":{"stringValue":"acme"}},{"key":"k8s.deployment.name","value":{"stringValue":"acme-api"}}]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"1010000000","severityNumber":17,"severityText":"ERROR","traceId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","spanId":"bbbbbbbbbbbbbbbb","body":{"stringValue":"request failed"},"attributes":[{"key":"infra.operation.kind","value":{"stringValue":"http"}},{"key":"infra.execution.outcome","value":{"stringValue":"error"}}]}]}]}]}"#;
         for (signal, payload) in [("traces", trace.as_slice()), ("logs", log.as_slice())] {
             let raw = Path::from(format!(
                 "raw/v1/{signal}/node-a/date=2026-08-25/hour=12/minute=03/{signal}.json"
@@ -537,9 +591,14 @@ mod tests {
                 .unwrap();
         }
 
-        compact(store.clone(), Duration::ZERO, Duration::from_secs(3_600))
-            .await
-            .unwrap();
+        compact(
+            store.clone(),
+            Duration::ZERO,
+            Duration::from_secs(3_600),
+            &application::test_sources(),
+        )
+        .await
+        .unwrap();
 
         let application = read_manifest(
             store.as_ref(),
@@ -571,9 +630,14 @@ mod tests {
             .put(&late, Bytes::copy_from_slice(trace).into())
             .await
             .unwrap();
-        compact(store.clone(), Duration::ZERO, Duration::from_secs(3_600))
-            .await
-            .unwrap();
+        compact(
+            store.clone(),
+            Duration::ZERO,
+            Duration::from_secs(3_600),
+            &application::test_sources(),
+        )
+        .await
+        .unwrap();
         let application = read_manifest(
             store.as_ref(),
             &Path::from("manifests/v1/applications/date=2026-08-25/hour=12/minute=03.json"),

@@ -172,8 +172,7 @@ exists, no rotation to forget. The alternative, a TokenRequest token, has its
 token and compare `exp` with `iat` to learn the duration you actually got.
 
 Build the kubeconfig from the token plus the cluster CA and server URL, and pipe
-it base64-encoded into `gh secret set` without displaying it. The full command
-sequence is in `docs/runbooks/nimmly-deploy.md`.
+it base64-encoded into `gh secret set` without displaying it. Use the selected deployment's credential-loading and CI configuration procedures.
 
 Then prove the credential is scoped correctly:
 

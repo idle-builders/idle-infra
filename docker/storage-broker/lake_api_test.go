@@ -305,10 +305,10 @@ func lakeServerForTest(store GovernedStore, backend lakeObjectBackend) *server {
 			DuckLakeRoot: "ducklake/", DuckLakeMaxPut: 96 * 1024 * 1024,
 			LakeOperationTTL: time.Minute, LakeIOIdleTTL: time.Second, LakeMaxConcurrency: 4,
 		},
-		policy:  &Policy{Namespaces: map[string]NamespacePolicy{"nimmly": {Bucket: "nimmly-files"}}},
-		appAuth: fixedReviewer{namespace: "nimmly", account: "transformation-storage-authority"},
+		policy:  &Policy{Namespaces: map[string]NamespacePolicy{"acme": {Bucket: "acme-files"}}},
+		appAuth: fixedReviewer{namespace: "acme", account: "transformation-storage-authority"},
 		governedPolicy: &GovernedPolicy{Namespaces: map[string]GovernedNamespacePolicy{
-			"nimmly": {ServiceAccounts: map[string][]GovernedOperation{
+			"acme": {ServiceAccounts: map[string][]GovernedOperation{
 				"transformation-storage-authority": {OperationLakeRead, OperationLakeWrite, OperationLakeDelete},
 			}},
 		}},
@@ -343,10 +343,10 @@ func lakePutRequest(path string, scope StorageScope, payload []byte) *http.Reque
 func activeLakeObject(scope StorageScope, payload []byte) GovernedObject {
 	digest := sha256.Sum256(payload)
 	return GovernedObject{
-		ID: lakeObjectID, Tenant: "nimmly", Scope: scope, ArtifactClass: ArtifactDuckLakeData,
+		ID: lakeObjectID, Tenant: "acme", Scope: scope, ArtifactClass: ArtifactDuckLakeData,
 		ContentHash: hex.EncodeToString(digest[:]), ByteSize: int64(len(payload)),
 		MediaType: "application/vnd.apache.parquet", State: ObjectStateActive,
-		Bucket: "nimmly-files", Key: "ducklake/main/facts/ducklake-file.parquet",
+		Bucket: "acme-files", Key: "ducklake/main/facts/ducklake-file.parquet",
 	}
 }
 
@@ -355,24 +355,24 @@ func TestLakePutStreamsExactPathAndActivatesBeforeSuccess(t *testing.T) {
 	backend := newLakeMemoryBackend()
 	payload := []byte("parquet bytes")
 	store.activationGate = func() {
-		if string(backend.objects[lakeMapKey("nimmly-files", "ducklake/main/facts/ducklake-file.parquet")]) != string(payload) {
+		if string(backend.objects[lakeMapKey("acme-files", "ducklake/main/facts/ducklake-file.parquet")]) != string(payload) {
 			t.Fatal("activation ran before the physical PUT completed")
 		}
 	}
 	s := lakeServerForTest(store, backend)
 	response := httptest.NewRecorder()
-	s.handleLakeS3(response, lakePutRequest("/nimmly-files/ducklake/main/facts/ducklake-file.parquet", TenantStorageScope(), payload))
+	s.handleLakeS3(response, lakePutRequest("/acme-files/ducklake/main/facts/ducklake-file.parquet", TenantStorageScope(), payload))
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	object := store.objects[lakeMapKey("nimmly-files", "ducklake/main/facts/ducklake-file.parquet")]
+	object := store.objects[lakeMapKey("acme-files", "ducklake/main/facts/ducklake-file.parquet")]
 	if object.State != ObjectStateActive || object.Key != "ducklake/main/facts/ducklake-file.parquet" ||
 		object.ArtifactClass != ArtifactDuckLakeData || store.activateCalls != 1 ||
 		!store.reserveSawLakeRegistrationLock || store.lakeRegistrationLockHeld {
 		t.Fatalf("unexpected governed object: %#v", object)
 	}
-	if !slices.Contains(store.claimedBuckets, "nimmly/nimmly-files") {
+	if !slices.Contains(store.claimedBuckets, "acme/acme-files") {
 		t.Fatalf("Lake PUT did not claim persisted bucket ownership: %#v", store.claimedBuckets)
 	}
 	if response.Header().Get("ETag") != `"`+object.ContentHash+`"` {
@@ -387,7 +387,7 @@ func TestLakePutRejectsConflictingPersistedBucketOwnerBeforeReservation(t *testi
 	s := lakeServerForTest(store, backend)
 	response := httptest.NewRecorder()
 	s.handleLakeS3(response, lakePutRequest(
-		"/nimmly-files/ducklake/main/facts/foreign.parquet", TenantStorageScope(), []byte("parquet bytes")))
+		"/acme-files/ducklake/main/facts/foreign.parquet", TenantStorageScope(), []byte("parquet bytes")))
 
 	if response.Code != http.StatusConflict || store.reserveCalls != 0 ||
 		store.lakeRegistrationLockHeld || store.registrationBarrier || len(backend.objects) != 0 {
@@ -411,18 +411,18 @@ func TestLakePutRejectsHashAndSizeMismatchWithoutReadableObject(t *testing.T) {
 			store := newLakeMemoryStore()
 			backend := newLakeMemoryBackend()
 			s := lakeServerForTest(store, backend)
-			request := lakePutRequest("/nimmly-files/ducklake/main/t/file.parquet", TenantStorageScope(), []byte("bytes"))
+			request := lakePutRequest("/acme-files/ducklake/main/t/file.parquet", TenantStorageScope(), []byte("bytes"))
 			test.mutate(request)
 			response := httptest.NewRecorder()
 			s.handleLakeS3(response, request)
 			if response.Code == http.StatusOK {
 				t.Fatal("mismatching PUT succeeded")
 			}
-			if _, err := store.ReadLakeObject(context.Background(), "nimmly", TenantStorageScope(),
-				"nimmly-files", "ducklake/main/t/file.parquet"); !errors.Is(err, ErrGovernedDenied) {
+			if _, err := store.ReadLakeObject(context.Background(), "acme", TenantStorageScope(),
+				"acme-files", "ducklake/main/t/file.parquet"); !errors.Is(err, ErrGovernedDenied) {
 				t.Fatalf("failed upload became readable: %v", err)
 			}
-			if _, exists := backend.objects[lakeMapKey("nimmly-files", "ducklake/main/t/file.parquet")]; exists {
+			if _, exists := backend.objects[lakeMapKey("acme-files", "ducklake/main/t/file.parquet")]; exists {
 				t.Fatal("mismatching physical object was not removed")
 			}
 		})
@@ -431,7 +431,7 @@ func TestLakePutRejectsHashAndSizeMismatchWithoutReadableObject(t *testing.T) {
 
 func TestLakePutRecoveryAndImmutableRetry(t *testing.T) {
 	payload := []byte("stable bytes")
-	path := "/nimmly-files/ducklake/main/t/file.parquet"
+	path := "/acme-files/ducklake/main/t/file.parquet"
 	key := "ducklake/main/t/file.parquet"
 
 	t.Run("reserved after interrupted upload retries", func(t *testing.T) {
@@ -441,13 +441,13 @@ func TestLakePutRecoveryAndImmutableRetry(t *testing.T) {
 		s := lakeServerForTest(store, backend)
 		first := httptest.NewRecorder()
 		s.handleLakeS3(first, lakePutRequest(path, TenantStorageScope(), payload))
-		if first.Code == http.StatusOK || store.objects[lakeMapKey("nimmly-files", key)].State != ObjectStateReserved {
+		if first.Code == http.StatusOK || store.objects[lakeMapKey("acme-files", key)].State != ObjectStateReserved {
 			t.Fatal("interrupted upload did not remain an unreadable reservation")
 		}
 		backend.putErr = nil
 		second := httptest.NewRecorder()
 		s.handleLakeS3(second, lakePutRequest(path, TenantStorageScope(), payload))
-		if second.Code != http.StatusOK || store.objects[lakeMapKey("nimmly-files", key)].State != ObjectStateActive {
+		if second.Code != http.StatusOK || store.objects[lakeMapKey("acme-files", key)].State != ObjectStateActive {
 			t.Fatalf("retry status = %d", second.Code)
 		}
 	})
@@ -459,7 +459,7 @@ func TestLakePutRecoveryAndImmutableRetry(t *testing.T) {
 		store.activateErr = errors.New("database unavailable")
 		first := httptest.NewRecorder()
 		s.handleLakeS3(first, lakePutRequest(path, TenantStorageScope(), payload))
-		if first.Code == http.StatusOK || string(backend.objects[lakeMapKey("nimmly-files", key)]) != string(payload) {
+		if first.Code == http.StatusOK || string(backend.objects[lakeMapKey("acme-files", key)]) != string(payload) {
 			t.Fatal("activation failure boundary was not established")
 		}
 		store.activateErr = nil
@@ -623,23 +623,23 @@ func TestLakeRequestBoundaryDenials(t *testing.T) {
 		mutate func(*http.Request, *server)
 		want   int
 	}{
-		{"wrong bucket", http.MethodPut, "/ambrovia-files/ducklake/main/t/f.parquet", nil, http.StatusForbidden},
-		{"outside root", http.MethodPut, "/nimmly-files/corpus/f.parquet", nil, http.StatusForbidden},
-		{"encoded traversal", http.MethodPut, "/nimmly-files/ducklake/%2e%2e/f.parquet", nil, http.StatusForbidden},
-		{"missing token", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) { r.Header.Del("x-amz-security-token") }, http.StatusUnauthorized},
-		{"invalid token", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet", func(_ *http.Request, s *server) { s.appAuth = rejectingReviewer{} }, http.StatusUnauthorized},
-		{"invalid authority", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) {
+		{"wrong bucket", http.MethodPut, "/atlas-files/ducklake/main/t/f.parquet", nil, http.StatusForbidden},
+		{"outside root", http.MethodPut, "/acme-files/corpus/f.parquet", nil, http.StatusForbidden},
+		{"encoded traversal", http.MethodPut, "/acme-files/ducklake/%2e%2e/f.parquet", nil, http.StatusForbidden},
+		{"missing token", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) { r.Header.Del("x-amz-security-token") }, http.StatusUnauthorized},
+		{"invalid token", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet", func(_ *http.Request, s *server) { s.appAuth = rejectingReviewer{} }, http.StatusUnauthorized},
+		{"invalid authority", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) {
 			r.Header.Set("Authorization", lakeAuthorization(WorkspaceStorageScope("bad")))
 		}, http.StatusForbidden},
-		{"unapproved account", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet", func(_ *http.Request, s *server) { s.appAuth = fixedReviewer{namespace: "nimmly", account: "default"} }, http.StatusForbidden},
-		{"missing length", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) { r.ContentLength = -1 }, http.StatusLengthRequired},
-		{"missing hash", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) { r.Header.Del("x-amz-content-sha256") }, http.StatusBadRequest},
-		{"oversize", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet", func(r *http.Request, s *server) { r.ContentLength = s.cfg.DuckLakeMaxPut + 1 }, http.StatusRequestEntityTooLarge},
-		{"multipart initiate", http.MethodPost, "/nimmly-files/ducklake/main/t/f.parquet?uploads", nil, http.StatusNotImplemented},
-		{"multipart part", http.MethodPut, "/nimmly-files/ducklake/main/t/f.parquet?partNumber=1&uploadId=x", nil, http.StatusNotImplemented},
-		{"multipart complete", http.MethodPost, "/nimmly-files/ducklake/main/t/f.parquet?uploadId=x", nil, http.StatusNotImplemented},
-		{"multipart abort", http.MethodDelete, "/nimmly-files/ducklake/main/t/f.parquet?uploadId=x", nil, http.StatusNotImplemented},
-		{"list objects", http.MethodGet, "/nimmly-files/?list-type=2", nil, http.StatusNotImplemented},
+		{"unapproved account", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet", func(_ *http.Request, s *server) { s.appAuth = fixedReviewer{namespace: "acme", account: "default"} }, http.StatusForbidden},
+		{"missing length", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) { r.ContentLength = -1 }, http.StatusLengthRequired},
+		{"missing hash", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet", func(r *http.Request, _ *server) { r.Header.Del("x-amz-content-sha256") }, http.StatusBadRequest},
+		{"oversize", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet", func(r *http.Request, s *server) { r.ContentLength = s.cfg.DuckLakeMaxPut + 1 }, http.StatusRequestEntityTooLarge},
+		{"multipart initiate", http.MethodPost, "/acme-files/ducklake/main/t/f.parquet?uploads", nil, http.StatusNotImplemented},
+		{"multipart part", http.MethodPut, "/acme-files/ducklake/main/t/f.parquet?partNumber=1&uploadId=x", nil, http.StatusNotImplemented},
+		{"multipart complete", http.MethodPost, "/acme-files/ducklake/main/t/f.parquet?uploadId=x", nil, http.StatusNotImplemented},
+		{"multipart abort", http.MethodDelete, "/acme-files/ducklake/main/t/f.parquet?uploadId=x", nil, http.StatusNotImplemented},
+		{"list objects", http.MethodGet, "/acme-files/?list-type=2", nil, http.StatusNotImplemented},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -663,7 +663,7 @@ func TestLakeRequestBoundaryDenials(t *testing.T) {
 func TestLakePhysicalBytesCannotBypassGovernedLifecycle(t *testing.T) {
 	payload := []byte("unguarded bytes")
 	backend := newLakeMemoryBackend()
-	backend.objects[lakeMapKey("nimmly-files", "ducklake/main/t/file.parquet")] = payload
+	backend.objects[lakeMapKey("acme-files", "ducklake/main/t/file.parquet")] = payload
 	store := newLakeMemoryStore()
 	s := lakeServerForTest(store, backend)
 
@@ -676,7 +676,7 @@ func TestLakePhysicalBytesCannotBypassGovernedLifecycle(t *testing.T) {
 		}
 		response := httptest.NewRecorder()
 		s.handleLakeS3(response, lakeRequest(http.MethodGet,
-			"/nimmly-files/ducklake/main/t/file.parquet", TenantStorageScope(), nil))
+			"/acme-files/ducklake/main/t/file.parquet", TenantStorageScope(), nil))
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("state %q exposed physical bytes with status %d", state, response.Code)
 		}
@@ -729,7 +729,7 @@ func TestLakeMaximumPutUsesBoundedStreamingReads(t *testing.T) {
 	probe := &boundedReadProbe{remaining: size}
 	hasher := sha256.New()
 	_, _ = io.Copy(hasher, &boundedReadProbe{remaining: size})
-	request := lakeRequest(http.MethodPut, "/nimmly-files/ducklake/main/t/large.parquet", TenantStorageScope(), probe)
+	request := lakeRequest(http.MethodPut, "/acme-files/ducklake/main/t/large.parquet", TenantStorageScope(), probe)
 	request.ContentLength = size
 	request.Header.Set("x-amz-content-sha256", hex.EncodeToString(hasher.Sum(nil)))
 	store := newLakeMemoryStore()
@@ -829,7 +829,7 @@ func TestLakeRequestsDoNotDependOnReplicaLocalSessionState(t *testing.T) {
 	backend := newLakeMemoryBackend()
 	firstReplica := lakeServerForTest(store, backend)
 	secondReplica := lakeServerForTest(store, backend)
-	path := "/nimmly-files/ducklake/main/t/replicated.parquet"
+	path := "/acme-files/ducklake/main/t/replicated.parquet"
 
 	put := httptest.NewRecorder()
 	firstReplica.handleLakeS3(put, lakePutRequest(path, TenantStorageScope(), payload))

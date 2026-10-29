@@ -132,13 +132,12 @@ curl -s https://<issuer>/oauth/v2/keys
 The discovery document is authoritative for the endpoint paths — read them from
 it rather than assuming.
 
-`docs/runbooks/nimmly-deploy.md` includes a JWKS stability check — fetch the
-endpoint repeatedly and confirm the key set does not flap during cold start or
+For a JWKS stability check, fetch the endpoint repeatedly and confirm the key set does not flap during cold start or
 rotation.
 
-## Email verification — there is no SMTP
+## Email verification — check SMTP configuration
 
-No SMTP is configured on the instance. A self-registered user cannot receive a
+If the selected deployment has no SMTP, a self-registered user cannot receive a
 verification email and stays `email_verified = false`, so any app requiring a
 verified email denies them. Magic-link and email-OTP login also do not work.
 

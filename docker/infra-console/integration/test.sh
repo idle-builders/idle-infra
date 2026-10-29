@@ -54,7 +54,7 @@ grep -E '^export INTEG_' "${ENV_FILE}" | sed "s/^export //; s/'//g" > "${WORK}/e
 # their tests run against the real API when a credential is present and skip
 # otherwise. Forwarded from the caller's environment rather than the harness
 # file, so a real token never lands on disk.
-for passthrough in INTEG_GITHUB_TOKEN INTEG_CLOUDFLARE_TOKEN INTEG_CLOUDFLARE_ACCOUNT; do
+for passthrough in INTEG_GITHUB_TOKEN INTEG_GITHUB_OWNER INTEG_GITHUB_REPO INTEG_CLOUDFLARE_TOKEN INTEG_CLOUDFLARE_ACCOUNT; do
   if [ -n "${!passthrough:-}" ]; then
     echo "${passthrough}=${!passthrough}" >> "${WORK}/env"
   fi

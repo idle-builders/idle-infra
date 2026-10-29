@@ -15,7 +15,7 @@
 --   (c) Local development testing
 --
 -- Replace:
---   :tenant_name     — tenant identifier (e.g. hyperidle, ambrovia, nimmly)
+--   :tenant_name     — tenant identifier (e.g. beacon, atlas, acme)
 --   :tenant_password — secure password for the tenant role
 --   :database_name   — PostgreSQL database (default: postgres)
 -- =============================================================================

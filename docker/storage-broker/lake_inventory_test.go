@@ -10,7 +10,7 @@ import (
 
 func TestLakeInventoryPaginatesExactWorkspaceAndBindsCursor(t *testing.T) {
 	object := func(id, workspace, key string, state ObjectState) GovernedObject {
-		return GovernedObject{ID: id, Tenant: "nimmly", Scope: WorkspaceStorageScope(workspace),
+		return GovernedObject{ID: id, Tenant: "acme", Scope: WorkspaceStorageScope(workspace),
 			ArtifactClass: ArtifactDuckLakeData, State: state, Key: key}
 	}
 	store := &fakeGovernedStore{lakeInventory: []GovernedObject{

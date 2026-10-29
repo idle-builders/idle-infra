@@ -95,12 +95,12 @@
 
 ## Rationale
 
-The word `index` currently describes two different things in the nimmly incident: PostgreSQL access paths and the `catalog_discovery_profiles` application projection. Combining their lifecycle creates the wrong owner and the wrong operation. The platform needs shared evidence and safe database-integrity procedures; applications need workload-specific migrations and projection workers. Keeping those authorities separate makes the shared system reusable without granting a generic job destructive access to every tenant schema.
+The word `index` can mean a PostgreSQL access path or an application-owned read projection. Combining their lifecycles creates the wrong owner and operation. The platform supplies health evidence and reviewed database-integrity procedures; applications supply their own migrations and projection workers.
 
 ## Required reading
 
 - `docs/concepts/platform.md` — platform, tenant, health-evidence, and remediation-policy authority.
-- `docs/architecture/platform.md` — PostgreSQL topology and schema isolation.
-- `docs/runbooks/postgresql-recovery.md` — current PostgreSQL observation and recovery procedures.
-- `helm/values/postgresql.yaml` — live engine, exporter, and autovacuum-related configuration.
+- `terraform/modules/platform` — PostgreSQL topology and shared services.
+- `skills/database/SKILL.md` — PostgreSQL observation and recovery procedures.
+- `helm/values/postgresql.yaml` — shared engine, exporter, and autovacuum-related configuration.
 - `scripts/postgresql-observe.sh` — current query-pressure evidence contract.

@@ -1,117 +1,96 @@
 # Idle Infra
 
-A reusable OpenTofu platform for a multi-tenant Kubernetes cluster on Infomaniak,
-with Cloudflare ingress, PostgreSQL, Zitadel, governed object storage and optional
-operational telemetry. Each operator owns a separate deployment repository and
-its credentials, domains, tenant inventory and encrypted state.
+**Run your applications on a cluster you own, with the shared services already connected.**
 
-`ambrovia/infra` is the first consuming deployment. This framework never selects
-that cluster automatically and its CI does not receive production credentials.
+Idle Infra brings Kubernetes, PostgreSQL, login, object storage and operational
+visibility together in one OpenTofu framework. Give each application its own
+namespace, database schema and deployment permissions. Share the services that
+would otherwise need setting up in every application.
 
-## Start a deployment
+![Idle Infra console: cluster capacity, application health and backup status](docs/images/console-overview.jpg)
 
-Install Git, OpenTofu 1.12.x, kubectl and Helm. Docker is needed to build runtime
-images and run local integration suites. Create an Infomaniak Public Cloud
-project and a Cloudflare account with the zones you will publish.
+*The real console UI, shown with fictional demo data. No running deployment is pictured.*
 
-Clone a reviewed framework revision, then scaffold a deployment:
+## Build applications, keep control of the platform
+
+- **Start with a shared foundation.** PostgreSQL with replication and scheduled
+  backups, Zitadel for OIDC login, Cloudflare Tunnel ingress and TLS automation.
+- **Give applications clear boundaries.** Tenant namespaces, resource quotas,
+  network policies, schema ownership and scoped deployer permissions are
+  declared together. Applications keep their own code and release pipelines.
+- **Keep storage credentials out of application pods.** The storage broker
+  mediates short-lived transfers and governed object access. Applications still
+  own their user and workspace authorization.
+- **See what needs attention.** The optional console brings nodes, workloads,
+  Helm releases, database activity, storage, identity and domains into one view.
+  Optional telemetry adds bounded historical evidence alongside live state;
+  missing evidence is shown explicitly.
+- **Operate through the same sources.** A versioned HTTP API, MCP tools and
+  operational agent skills help inspect the platform and carry out reviewed
+  infrastructure work.
+- **Own your deployment.** Configuration, credentials, domains, state and tenant
+  inventory live in your deployment repository. Pin framework revisions and
+  runtime image digests; upgrades happen when you choose them.
+
+![Tenant view: workload readiness, quota, database, storage, identity and domains](docs/images/console-tenants.jpg)
+
+*Fictional applications illustrate how shared services fit together per tenant.*
+
+## What you get
+
+| Layer | Included |
+| --- | --- |
+| Compute | Kubernetes cluster module, tenant namespaces, quotas, RBAC and network policies |
+| Data | Shared PostgreSQL, tenant schemas and roles, backup jobs, object-storage broker |
+| Access | Shared Zitadel identity provider, Cloudflare Tunnel, ingress and certificates |
+| Operations | Optional console, HTTP API and MCP, operational skills, optional OpenTelemetry collection and Parquet query path |
+| Delivery | OpenTofu modules, Helm values, deployment scaffold and runtime image build workflows |
+
+This is for operators who want to run several applications on shared Kubernetes
+and retain direct access to the infrastructure. It assumes comfort with
+OpenTofu, Kubernetes and operating a database. It is an infrastructure framework;
+application deployment and day-to-day operations remain yours.
+
+## Start your own cluster
+
+The current deployment example uses **Infomaniak Managed Kubernetes and
+OpenStack object storage**, with Cloudflare at the edge. Fresh cluster bootstrap
+is documented; it has not yet been verified end to end on a new cloud project.
 
 ```bash
 git clone https://github.com/idle-builders/idle-infra.git
 cd idle-infra
 scripts/init-instance.sh /absolute/path/to/my-infra
-cd /absolute/path/to/my-infra
 ```
 
-The deployment pins the complete framework in a Git submodule. Commit that pin
-alongside your configuration. On every machine and in CI, clone with
-`--recurse-submodules` or run `git submodule update --init --recursive`.
+The scaffold creates your separate deployment repository with a pinned framework
+submodule. Supply your own cloud account, domains and credentials, then follow
+[the staged setup guide](docs/getting-started.md). Provisioning cloud resources
+incurs your provider's charges.
 
-Set required inputs through `TF_VAR_*` environment variables or a gitignored
-`.tfvars` file. See `terraform/main/variables.tf`. Supply your own cloud project
-IDs, domains, ACME email, first Zitadel administrator, database credentials,
-backup and escrow credentials, state-encryption passphrase and runtime images.
-Never commit credentials. `tenants` declares namespace names and allowed domains;
-`tenant_db_passwords` supplies their separately stored passwords.
+Runtime images have build workflows under `ghcr.io/idle-builders/idle-infra/`.
+Public package access is pending organization configuration; build from source
+or use authorized package access for now. Always pin image digests.
 
-The default Kubernetes StorageClass is expected to be Infomaniak's retained
-Cinder class. Verify that the class exists and supports expansion before
-provisioning PostgreSQL. Select region, node capacity, placement and disk size in
-your deployment. The sample uses the current Infomaniak stack; other clouds are
-not yet supported.
+## Providers
 
-## Bootstrap in stages
+The goal is the same application platform on different infrastructure providers.
+**Infomaniak is the current implementation. Hetzner is planned, not supported yet.**
+Cluster provisioning, persistent volumes, object-storage credentials and storage
+usage reporting need explicit provider adapters. Kubernetes manifests alone do
+not make a deployment portable. The [provider plan](docs/providers.md) identifies
+those boundaries and the evidence required before adding another supported cloud.
 
-Kubernetes and PostgreSQL providers need live endpoints, so a fresh installation
-cannot be applied in one pass. The existing-cluster migration does not need these
-bootstrap targets.
+## Explore and contribute
 
-1. With Infomaniak/OpenStack credentials loaded, initialize your deployment and
-   plan/apply `-target=module.cluster`. Keep its initial local state encrypted.
-2. Retrieve the new cluster's kubeconfig through Infomaniak and load it securely.
-   Do not put cluster-admin credentials in Git or tenant CI. Set `kubeconfig_path`.
-3. Read the actual post-DNAT endpoint with
-   `kubectl get endpoints kubernetes -n default`. Set `apiserver_cidr` and
-   `apiserver_port`; copying another cluster's address breaks network policies.
-4. Plan/apply `-target=module.platform.helm_release.postgresql`. Wait for primary
-   and replica readiness, then port-forward `infra/postgresql-primary` to the
-   `postgresql_admin_port` configured in your deployment.
-5. Review and apply a full plan. The remaining providers can now create roles,
-   schemas, shared services and tenant boundaries.
-6. Create a versioned state bucket using `framework/terraform/bootstrap` with its
-   own encrypted local state. Add an S3 backend configured for **your** bucket,
-   key and endpoint, then migrate deployment state with `tofu init -migrate-state`.
-   Store backend credentials and encryption keys separately. The framework never
-   points a new deployment at Ambrovia's state bucket.
+- [Setup, upgrades and instance selection](docs/getting-started.md)
+- [Platform and tenant boundaries](docs/concepts/platform.md)
+- [Shared authentication](docs/concepts/shared-auth.md)
+- [Governed object storage](docs/concepts/governed-object-storage.md)
+- [Console API](docs/api/console-v1.yaml)
+- [Reproduce the screenshots locally](docs/demo/README.md)
 
-The bootstrap bucket is a separate root. Serialize all writes to each remote
-state. Infomaniak Swift does not provide the locking used by AWS examples; use
-one CI concurrency group across all deployment and identity writers, and block
-local applies while any of them is queued or running.
+Run `tests/validate.sh` for the framework checks and the affected runtime suites
+when changing a component. See [AGENTS.md](AGENTS.md) for contribution boundaries.
 
-Use `-lockfile=readonly` for normal initialization. Framework changes never
-implicitly upgrade provider locks.
-
-## Runtime images and releases
-
-The workflows build `storage-broker`, `infra-console`, `pg-backup`,
-`otel-collector` and `telemetry-data` under `ghcr.io/idle-builders/idle-infra/`.
-Builds publish commit tags and print their digests. Pin the selected image digests
-in the deployment; publishing framework code deploys nothing. Console and
-observability are optional; their image inputs are required when enabled.
-
-For an upgrade, check out the chosen framework commit in the submodule, update
-image pins when required, inspect the plan, and commit the dependency change in
-the deployment repository. Keep release-specific migration blocks. Reverting a
-source pin after state-address migration requires the corresponding reverse
-migration; a plain Git revert is not a state rollback.
-
-## Operate a selected cluster
-
-Install skills and choose an instance independently:
-
-```bash
-framework/scripts/install-plugin.sh
-framework/scripts/select-instance.sh /absolute/path/to/my-infra
-framework/scripts/with-infra.sh kubectl get nodes
-```
-
-`.infra-instance.json` names the OpenTofu root and an optional deployment-owned
-credential loader. CI can leave the loader empty and supply its environment.
-Selection precedence is `INFRA_REPO`, the current deployment, then the explicitly
-selected default. An invalid explicit selection fails closed. Installing a plugin
-never changes the selected cluster.
-
-## Verify changes
-
-Run `tests/validate.sh` in the framework for example validation, chart-value
-parsing, the API contract and instance-selection/credential-cleanup tests. Runtime
-workflows run Go tests, the real DuckLake probe, generated-code checks, image
-builds and the Collector/compactor integration path.
-
-Each deployment must also run its own live contract and acceptance tests. These
-must attempt both allowed and forbidden paths: namespace isolation, PostgreSQL
-schema access, deployer permissions and application storage authority. A clean
-plan alone does not prove those boundaries. A fresh cloud installation has not
-yet been exercised by this extraction's example validation; record that proof
-separately from migration testing.
+[MIT licensed](LICENSE).

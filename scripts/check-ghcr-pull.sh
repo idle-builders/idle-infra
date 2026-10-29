@@ -16,7 +16,7 @@ Environment:
 
 Example:
   GHCR_USERNAME=tobias GHCR_TOKEN=... \
-    scripts/check-ghcr-pull.sh ghcr.io/ambrovia/infra/storage-broker@sha256:...
+    scripts/check-ghcr-pull.sh ghcr.io/idle-builders/idle-infra/storage-broker@sha256:...
 USAGE
 }
 

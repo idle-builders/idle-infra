@@ -1,7 +1,7 @@
 dist:
   module: github.com/idle-builders/idle-infra/otelcol-infra
   name: otelcol-infra
-  description: Minimal OpenTelemetry collector for the Ambrovia infrastructure cluster
+  description: Minimal OpenTelemetry collector for the Atlas infrastructure cluster
   version: 0.1.0
   output_path: ./_build
   otelcol_version: 0.159.0

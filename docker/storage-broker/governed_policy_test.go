@@ -8,7 +8,7 @@ func TestGovernedPolicyExplicitlyEmptyDeniesEveryOperation(t *testing.T) {
 		t.Fatalf("load retired governed tenant policy: %v", err)
 	}
 	for operation := range governedOperations {
-		for _, namespace := range []string{"nimmly", "ambrovia", "hyperidle", ""} {
+		for _, namespace := range []string{"acme", "atlas", "beacon", ""} {
 			if err := policy.Authorize(namespace, "default", operation); err == nil {
 				t.Fatalf("empty policy allowed %s for %q", operation, namespace)
 			}
@@ -26,7 +26,7 @@ func TestGovernedPolicyRejectsMissingNamespaces(t *testing.T) {
 
 func TestGovernedPolicyUsesExactServiceAccountRoles(t *testing.T) {
 	policy := GovernedPolicy{Namespaces: map[string]GovernedNamespacePolicy{
-		"nimmly": {
+		"acme": {
 			ServiceAccounts: map[string][]GovernedOperation{
 				"transformation-storage-authority":  {OperationRegisterObject, OperationDeleteObject, OperationIssueGrant, OperationConsumeGrant, OperationRevokeGrant},
 				"transformation-sandbox-controller": {OperationConsumeGrant, OperationRevokeGrant, OperationRegisterOutput},
@@ -41,16 +41,16 @@ func TestGovernedPolicyUsesExactServiceAccountRoles(t *testing.T) {
 		operation GovernedOperation
 		allowed   bool
 	}{
-		{"issuer registers objects", "nimmly", "transformation-storage-authority", OperationRegisterObject, true},
-		{"issuer deletes exact objects", "nimmly", "transformation-storage-authority", OperationDeleteObject, true},
-		{"issuer issues grants", "nimmly", "transformation-storage-authority", OperationIssueGrant, true},
-		{"issuer consumes bounded grants", "nimmly", "transformation-storage-authority", OperationConsumeGrant, true},
-		{"controller consumes grants", "nimmly", "transformation-sandbox-controller", OperationConsumeGrant, true},
-		{"controller registers outputs", "nimmly", "transformation-sandbox-controller", OperationRegisterOutput, true},
-		{"controller cannot issue", "nimmly", "transformation-sandbox-controller", OperationIssueGrant, false},
-		{"controller cannot delete", "nimmly", "transformation-sandbox-controller", OperationDeleteObject, false},
-		{"other service account denied", "nimmly", "default", OperationConsumeGrant, false},
-		{"other tenant denied", "ambrovia", "transformation-sandbox-controller", OperationConsumeGrant, false},
+		{"issuer registers objects", "acme", "transformation-storage-authority", OperationRegisterObject, true},
+		{"issuer deletes exact objects", "acme", "transformation-storage-authority", OperationDeleteObject, true},
+		{"issuer issues grants", "acme", "transformation-storage-authority", OperationIssueGrant, true},
+		{"issuer consumes bounded grants", "acme", "transformation-storage-authority", OperationConsumeGrant, true},
+		{"controller consumes grants", "acme", "transformation-sandbox-controller", OperationConsumeGrant, true},
+		{"controller registers outputs", "acme", "transformation-sandbox-controller", OperationRegisterOutput, true},
+		{"controller cannot issue", "acme", "transformation-sandbox-controller", OperationIssueGrant, false},
+		{"controller cannot delete", "acme", "transformation-sandbox-controller", OperationDeleteObject, false},
+		{"other service account denied", "acme", "default", OperationConsumeGrant, false},
+		{"other tenant denied", "atlas", "transformation-sandbox-controller", OperationConsumeGrant, false},
 	}
 
 	for _, test := range tests {
@@ -69,7 +69,7 @@ func TestGovernedPolicyUsesExactServiceAccountRoles(t *testing.T) {
 func TestGovernedPolicyRejectsUnknownOperationAtLoad(t *testing.T) {
 	_, err := parseGovernedPolicy([]byte(`{
 		"namespaces": {
-			"nimmly": {
+			"acme": {
 				"serviceAccounts": {
 					"worker": ["grant:issue", "bucket:admin"]
 				}
@@ -84,7 +84,7 @@ func TestGovernedPolicyRejectsUnknownOperationAtLoad(t *testing.T) {
 func TestGovernedPolicyRejectsTrailingJSONAtLoad(t *testing.T) {
 	_, err := parseGovernedPolicy([]byte(`{
 		"namespaces": {
-			"nimmly": {
+			"acme": {
 				"serviceAccounts": {
 					"worker": ["grant:consume"]
 				}

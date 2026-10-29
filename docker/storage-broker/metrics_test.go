@@ -102,7 +102,7 @@ func TestBrokerMetricsClassifiesDeleteObjectsSeparately(t *testing.T) {
 	handler := instrumentLakeRequest(metrics, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/nimmly-files?delete", nil))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/acme-files?delete", nil))
 
 	recorder := httptest.NewRecorder()
 	metrics.serveHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))

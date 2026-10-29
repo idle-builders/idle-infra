@@ -7,7 +7,7 @@ set -euo pipefail
 NAMESPACE="${PG_NAMESPACE:-infra}"
 # @lore Routine checks default to the primary. The first production proof on
 # 2026-08-21 ran on the replica, where WAL replay cancelled checks for the large
-# nimmly indexes. Those recovery conflicts are availability protection, not
+# tenant indexes. Those recovery conflicts are availability protection, not
 # corruption, and would make a replica-only job produce false alarms.
 POD="${PG_PRIMARY_POD:-postgresql-primary-0}"
 CONTAINER="${PG_CONTAINER:-postgresql}"

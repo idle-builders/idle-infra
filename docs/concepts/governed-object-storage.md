@@ -1,13 +1,12 @@
 # Governed Object Storage
 
+Examples use the fictional `acme` tenant. Workload authorities and producer
+ServiceAccounts are deployment configuration, not preselected framework tenants.
+
 ## Required reading
 
 - `docs/concepts/platform.md` — platform tenant, shared service and isolation-boundary authority
 - `docs/concepts/shared-auth.md` — authentication is shared; application authorization remains tenant-owned
-- `docs/plans/presign-storage-broker.md` — legacy prefix broker being reshaped by this concept
-- nimmly `docs/tenancy-and-auth-todo.md` — nimmly owns Workspace and Membership; Zitadel carries no Workspace claim
-- nimmly `.pipeline/work/N1/plan.md` — transformation behavior requiring authorized, replayable object artifacts
-- nimmly `.pipeline/work/N1/architecture.md` — governed object and bounded execution-grant contracts
 
 ## Governed object
 
@@ -26,7 +25,7 @@ exactly one platform tenant and either tenant-public authority or one applicatio
 **What it is not.**
 
 - **Not an S3 key or prefix.** Keys place bytes; renaming or copying a key cannot grant authority.
-- **Not a workspace membership.** Nimmly and each other tenant application decide which human or job belongs to
+- **Not a workspace membership.** Each tenant application decide which human or job belongs to
   an application workspace. The broker enforces a supplied, already-authorized scope against its own rows.
 - **Not the bytes.** Bytes remain in S3 and move through short-lived presigned transfers; the row is authorization
   metadata.
@@ -65,9 +64,9 @@ Content-Type: application/json
 
 Tenant-public deletion uses `{"authority":{"kind":"tenant"}}`. The broker derives `tenantId` and the exact
 ServiceAccount from TokenReview; neither is caller-supplied. The caller must hold the `object:delete` governed
-operation. For nimmly, only `transformation-storage-authority` has that operation. Nimmly remains responsible for
+operation. In this example, only `transformation-storage-authority` has that operation. Acme remains responsible for
 membership authorization, selecting all dependent object IDs and stopping writers before deletion. The broker
-does not query nimmly's schema or discover dependencies.
+does not query acme's schema or discover dependencies.
 
 The supplied authority is an equality check, not the workspace read overlay. A workspace request cannot delete a
 tenant-public object or an object from another workspace; a tenant-public request cannot delete a workspace
@@ -80,7 +79,7 @@ The response contract is:
 {
   "schemaVersion": 1,
   "objectId": "<opaque UUID>",
-  "tenantId": "nimmly",
+  "tenantId": "acme",
   "authority": {"kind": "workspace", "workspaceId": "<workspace UUID>"},
   "accessState": "revoked",
   "accessRevokedAt": "<RFC3339 timestamp>",
@@ -116,7 +115,7 @@ an ordinary upload ticket, the broker therefore will not attempt or report physi
 configured PUT-ticket lifetime has elapsed after `accessRevokedAt` (currently 300 seconds). During that window a
 previously issued PUT may still recreate only its recorded staging object; it can never write the final locator or
 commit the tombstoned row. On retry after the window, the broker removes both staging and final/current locators
-and confirms both absent. Nimmly's required stop-writers step ensures no upload was already in flight when
+and confirms both absent. Acme's required stop-writers step ensures no upload was already in flight when
 deletion began; the broker cannot observe an HTTP request already executing directly against S3. Existing GET
 tickets may remain bearer-readable until their expiry or earlier physical removal, so `accessState: "revoked"`
 specifically means broker authorization is revoked, not that every previously issued bearer URL has expired. The
@@ -132,7 +131,7 @@ then streams and cleans the prefix again. Because an eventually consistent listi
 key, these legacy rows remain `503`/`pending` until their exact locator history is remediated; the broker never reports
 physical completion from elapsed time alone. New reservations and registrations retain their exact staging locator,
 so they can complete normally. A referenced staging key is never deleted
-speculatively: the response remains `503`/`pending` until Nimmly's dependency selection has deleted the owning object
+speculatively: the response remains `503`/`pending` until Acme's dependency selection has deleted the owning object
 as well. This conservative sweep also removes abandoned legacy uploads without crossing the tenant-public/Workspace
 boundary. Physical cleanup and confirmation hold a cross-replica, bucket-wide registration barrier and refuse to
 remove bytes unless an immutable `storage_bucket_owners` record and persisted object history both prove that the
@@ -161,7 +160,7 @@ seconds per replica. Remediate by moving or removing the foreign object rows and
 readable key omitted by an eventually consistent listing cannot become active between the final scan and
 confirmation. A `register-existing` attempt that overlaps cleanup's exclusive barrier is rejected with `409`, rather
 than waiting and becoming live immediately after a confirmed response; a later retry is a new registration decision
-by Nimmly. Before recording
+by Acme. Before recording
 either sweep or final confirmation, the broker also queries for every live database locator under the exact staging
 prefix. This catches a registration that completed before cleanup even when Swift omitted its key from the listing.
 The object lock is released after the durable tombstone, before the barrier is taken, so concurrent cleanup cannot
@@ -170,7 +169,7 @@ recursively exhaust the broker's lock pool.
 Brokers built before the shared gate take it exclusively for every reservation. While old and new replicas run
 together (a rolling update to the shared gate, and again on rollback), old-replica reservations keep the gate
 exclusively held or queued almost continuously, so new-replica reservations rarely acquire it and return `503` after
-their 60-second wait. Isolation is unaffected; only liveness suffers. Quiesce reservation traffic (pause Nimmly's
+their 60-second wait. Isolation is unaffected; only liveness suffers. Quiesce reservation traffic (pause Acme's
 ingestion writers) for that rollout or rollback, and resume once every pod runs the same image.
 
 The first deployment of this lock protocol is deliberately staged without downtime. The fixed broker image must
@@ -226,7 +225,7 @@ The aggregate response is:
 ```json
 {
   "schemaVersion": 1,
-  "tenantId": "nimmly",
+  "tenantId": "acme",
   "authority": {"kind": "workspace", "workspaceId": "<workspace UUID>"},
   "cleanupOwnerId": "<owner UUID; owner cleanup only>",
   "accessState": "revoked",
@@ -261,9 +260,9 @@ with Kubernetes TokenReview, derives the tenant bucket from that reviewed namesp
 assertion only from a ServiceAccount holding the corresponding `lake:*` role. The dummy secret and requested
 bucket have no authority.
 
-Only the trusted nimmly `transformation-storage-authority` ServiceAccount receives `lake:read`, `lake:write` and
+Only the trusted acme `transformation-storage-authority` ServiceAccount receives `lake:read`, `lake:write` and
 `lake:delete`. The sandbox controller, generated SQL and model workloads receive neither those roles nor the
-projected token or in-memory DuckDB secret. The nimmly host must resolve and pin one publication write authority
+projected token or in-memory DuckDB secret. The acme host must resolve and pin one publication write authority
 before creating that temporary secret; one publication must not mix tenant-public and workspace-private output
 inside a Parquet object.
 
@@ -277,7 +276,7 @@ The data route implements this S3 subset:
 | `DELETE` | Exact write-scope equality; reserved/active/retry-deleted row marked deleted before physical deletion; success only after backend absence is confirmed and persisted |
 | `POST /<bucket>?delete` | MD5-verified XML `DeleteObjects` batch of 1–1,000 exact keys; path locks drain in-flight PUTs, every row is authorized and marked deleted atomically, and per-key absence confirmation remains retryable |
 
-The configured single-PUT ceiling is 96 MiB, leaving headroom over nimmly's initial DuckLake
+The configured single-PUT ceiling is 96 MiB, leaving headroom over acme's initial DuckLake
 `target_file_size = '32MB'`. Multipart initiation, parts, completion and abort are explicitly rejected. So are
 `ListObjectsV2` and every other form of object listing remain rejected. Multi-object deletion does not enumerate a
 prefix: it accepts only exact keys named by DuckLake, applies the same exact write-scope equality as single-object

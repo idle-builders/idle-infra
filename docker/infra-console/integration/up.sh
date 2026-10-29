@@ -37,6 +37,10 @@ S3_ENDPOINT="http://127.0.0.1:59000"
 # that has a completed run.
 SEED_SHA="${INTEG_SEED_SHA:?Set INTEG_SEED_SHA to a real commit with a completed workflow in your fixture repository}"
 SEED_IMAGE="${INTEG_SEED_IMAGE:?Set INTEG_SEED_IMAGE to the fixture workload image at that commit}"
+if [ -n "${INTEG_GITHUB_TOKEN:-}" ]; then
+  : "${INTEG_GITHUB_OWNER:?Set the GitHub fixture repository owner}"
+  : "${INTEG_GITHUB_REPO:?Set the GitHub fixture repository name}"
+fi
 PG_PORT=55432
 
 log() { echo "  $*" >&2; }
@@ -89,7 +93,7 @@ PAT="$(cat "${HERE}/.pat/console.pat")"
 # --- Zitadel: an organization matching the tenant, with a user and an app ----
 #
 # The console looks up a tenant's identity by org NAME == namespace. The
-# bootstrap org is called "hyperidle", so without this the auth panel would
+# bootstrap org is called "beacon", so without this the auth panel would
 # only ever be seen in its degraded state.
 #
 # Resolve-or-create: Zitadel refuses to delete an org (405), so re-running
