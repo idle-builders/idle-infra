@@ -56,8 +56,9 @@ func parseGovernedPolicy(data []byte) (*GovernedPolicy, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse governed policy: expected one JSON value")
 	}
-	if len(policy.Namespaces) == 0 {
-		return nil, fmt.Errorf("governed policy has no namespaces")
+	// @lore An explicit empty allowlist retires the last governed tenant without stopping the shared broker.
+	if policy.Namespaces == nil {
+		return nil, fmt.Errorf("governed policy namespaces are missing")
 	}
 	for namespace, namespacePolicy := range policy.Namespaces {
 		if !kubernetesName.MatchString(namespace) {

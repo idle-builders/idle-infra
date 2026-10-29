@@ -2,6 +2,28 @@ package main
 
 import "testing"
 
+func TestGovernedPolicyExplicitlyEmptyDeniesEveryOperation(t *testing.T) {
+	policy, err := parseGovernedPolicy([]byte(`{"namespaces":{}}`))
+	if err != nil {
+		t.Fatalf("load retired governed tenant policy: %v", err)
+	}
+	for operation := range governedOperations {
+		for _, namespace := range []string{"nimmly", "ambrovia", "hyperidle", ""} {
+			if err := policy.Authorize(namespace, "default", operation); err == nil {
+				t.Fatalf("empty policy allowed %s for %q", operation, namespace)
+			}
+		}
+	}
+}
+
+func TestGovernedPolicyRejectsMissingNamespaces(t *testing.T) {
+	for _, input := range []string{`{}`, `{"namespaces":null}`, `null`} {
+		if _, err := parseGovernedPolicy([]byte(input)); err == nil {
+			t.Fatalf("accepted missing namespaces: %s", input)
+		}
+	}
+}
+
 func TestGovernedPolicyUsesExactServiceAccountRoles(t *testing.T) {
 	policy := GovernedPolicy{Namespaces: map[string]GovernedNamespacePolicy{
 		"nimmly": {
