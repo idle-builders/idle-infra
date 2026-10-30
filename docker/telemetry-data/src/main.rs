@@ -94,15 +94,18 @@ async fn compact(
 
     // Application summaries and sampled execution bundles must be durable
     // before the ordinary signal path can make raw objects cleanup-eligible.
-    compact_applications(
-        store.as_ref(),
-        started,
-        seal_delay,
-        &run_id,
-        &mut report,
-        sources,
-    )
-    .await?;
+    // With no onboarded applications, skip the extra object-store scan entirely.
+    if !sources.is_empty() {
+        compact_applications(
+            store.as_ref(),
+            started,
+            seal_delay,
+            &run_id,
+            &mut report,
+            sources,
+        )
+        .await?;
+    }
 
     for signal in SIGNALS {
         let prefix = Path::from(format!("raw/v1/{signal}"));
@@ -570,6 +573,14 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(ordinary.total_rows, 1);
+        assert!(matches!(
+            store
+                .get(&Path::from(
+                    "manifests/v1/applications/date=2026-08-25/hour=12/minute=03.json"
+                ))
+                .await,
+            Err(object_store::Error::NotFound { .. })
+        ));
         assert!(matches!(
             store.get(&raw).await,
             Err(object_store::Error::NotFound { .. })
