@@ -18,5 +18,11 @@ for p in root.glob('skills/*/SKILL.md'):
 for p in root.glob('.github/workflows/*.yml'):
     workflow=yaml.safe_load(p.read_text())
     assert 'jobs' in workflow,p
+
+collector=yaml.safe_load((root/'docker/otel-collector/config.yaml').read_text())
+assert 'storage' not in collector['receivers']['k8s_objects/events'], \
+    'leader-elected Kubernetes events must not persist checkpoints on pod-local storage'
+assert collector['receivers']['filelog/storage_broker']['storage'] == 'file_storage', \
+    'file log offsets still require local persistence'
 print('Framework values, skills, manifests and workflows validated.')
 PYCODE
